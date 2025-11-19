@@ -24,7 +24,7 @@ class CarRacingEnvWrapper(gym.Env):
     """
     metadata = {'render.modes': ['human', 'rgb_array']}
     
-    def __init__(self, max_steps=1000, use_extended_actions=True, use_discrete_actions=False):
+    def __init__(self, max_steps=1000, use_extended_actions=True, use_discrete_actions=True):
         """
         Args:
             max_steps: 최대 스텝 수

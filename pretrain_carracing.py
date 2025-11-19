@@ -55,6 +55,10 @@ def main():
                         help='디바이스 (cuda/cpu)')
     parser.add_argument('--render', action='store_true',
                         help='렌더링 활성화')
+    parser.add_argument('--use-discrete-actions', action='store_true', default=True,
+                        help='이산 액션 공간 사용 (기본값, 5개 액션: 정지, 전진직진, 전진좌회전, 전진우회전, 후진)')
+    parser.add_argument('--use-continuous-actions', dest='use_discrete_actions', action='store_false',
+                        help='연속 액션 공간 사용 (이산 액션 비활성화)')
     
     args = parser.parse_args()
     
@@ -63,13 +67,17 @@ def main():
     print(f"사용 디바이스: {device}")
     
     # 에이전트 생성
+    # 이산 액션 모드인지 확인 (기본값: True)
+    use_discrete = args.use_discrete_actions
     agent = PPOAgent(
         state_dim=256,
-        action_dim=2,
+        action_dim=2 if not use_discrete else 5,
         hidden_dim=args.hidden_dim,
         lr_actor=args.lr_actor,
         lr_critic=args.lr_critic,
-        device=device
+        device=device,
+        discrete_action=use_discrete,
+        num_discrete_actions=5
     )
     
     if args.stage == 'pretrain':
@@ -80,7 +88,8 @@ def main():
         # CarRacing 환경 생성
         env = CarRacingEnvWrapper(
             max_steps=args.max_episode_steps,
-            use_extended_actions=True
+            use_extended_actions=True,
+            use_discrete_actions=args.use_discrete_actions
         )
         
         print("CarRacing 환경에서 사전학습 시작...")
@@ -132,7 +141,8 @@ def main():
         
         env = RCCarEnv(
             max_steps=args.max_episode_steps,
-            use_extended_actions=True
+            use_extended_actions=True,
+            use_discrete_actions=args.use_discrete_actions
         )
         
         # 전이학습 (더 작은 학습률 권장)
@@ -186,14 +196,16 @@ def main():
             # CarRacing 환경으로 테스트
             env = CarRacingEnvWrapper(
                 max_steps=args.max_episode_steps,
-                use_extended_actions=True
+                use_extended_actions=True,
+                use_discrete_actions=args.use_discrete_actions
             )
             print("\nCarRacing 환경에서 테스트 시작...")
         else:
             # 실제 RC Car 환경 생성
             env = RCCarEnv(
                 max_steps=args.max_episode_steps,
-                use_extended_actions=True
+                use_extended_actions=True,
+                use_discrete_actions=args.use_discrete_actions
             )
             print("\n실제 RC Car 환경에서 테스트 시작...")
         

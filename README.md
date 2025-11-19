@@ -291,6 +291,177 @@ sudo usermod -a -G video $USER
 - Install picamera2: `sudo apt install python3-picamera2`
 - Ensure camera is enabled: `sudo raspi-config` > Interface Options > Camera > Enable
 
+## 모델 사전학습 (Pretraining)
+
+### 개요
+
+실제 RC Car 하드웨어에서 직접 학습하는 것은 비효율적이고 위험합니다. 대신 **CarRacing 시뮬레이션 환경**에서 먼저 사전학습한 후, 실제 하드웨어로 전이학습하는 것을 권장합니다.
+
+**권장 학습 파이프라인:**
+1. **CarRacing 환경에서 사전학습** (Gym CarRacing-v2) - 실제 하드웨어 없이 빠른 학습
+2. **실제 RC Car 환경으로 전이학습** (선택사항) - 사전학습된 모델을 Fine-tuning
+3. **실제 하드웨어에서 테스트/추론** - 학습된 모델로 자율주행 테스트
+
+### 사전 요구사항
+
+```bash
+# 필요한 패키지 설치
+pip install torch numpy gym gymnasium pygame
+
+# Box2D 설치 (CarRacing 환경에 필요)
+# Linux:
+sudo apt-get install swig
+pip install box2d-py
+
+# 또는 직접:
+pip install gym[box2d]
+```
+
+### 1단계: CarRacing 환경에서 사전학습
+
+CarRacing 시뮬레이션 환경에서 모델을 사전학습합니다. 이 단계는 실제 하드웨어 없이 일반 PC에서도 실행 가능합니다.
+
+```bash
+# 기본 사전학습 (500K 스텝)
+python pretrain_carracing.py --stage pretrain --pretrain-steps 500000
+
+# 커스텀 파라미터로 사전학습
+python pretrain_carracing.py \
+    --stage pretrain \
+    --pretrain-steps 1000000 \
+    --pretrain-save-path ppo_pretrained_1M.pth \
+    --max-episode-steps 1000 \
+    --update-frequency 2048 \
+    --update-epochs 10 \
+    --hidden-dim 256 \
+    --lr-actor 3e-4 \
+    --lr-critic 3e-4
+```
+
+**주요 파라미터:**
+- `--pretrain-steps`: 총 학습 스텝 수 (기본: 500000)
+- `--pretrain-save-path`: 모델 저장 경로 (기본: `ppo_pretrained.pth`)
+- `--max-episode-steps`: 에피소드 최대 길이 (기본: 1000)
+- `--update-frequency`: PPO 업데이트 주기 (기본: 2048)
+- `--update-epochs`: 업데이트 시 에폭 수 (기본: 10)
+- `--hidden-dim`: 신경망 히든 레이어 차원 (기본: 256)
+- `--lr-actor`: Actor 학습률 (기본: 3e-4)
+- `--lr-critic`: Critic 학습률 (기본: 3e-4)
+- `--render`: 학습 중 시각화 활성화 (선택사항)
+
+**학습 과정:**
+- 초기 (0~50K 스텝): 랜덤 액션, 트랙 이탈 빈번
+- 중기 (50K~200K 스텝): 차선 따라가기 패턴 학습
+- 후기 (200K~500K 스텝): 안정적인 주행, 트랙 유지
+
+**학습 시간 예상:**
+- 500K 스텝: 약 2-4시간 (GPU 사용 시), 8-12시간 (CPU만 사용 시)
+- 1M 스텝: 약 4-8시간 (GPU 사용 시), 16-24시간 (CPU만 사용 시)
+
+### 2단계: 실제 RC Car 환경으로 전이학습 (선택사항)
+
+사전학습된 모델을 실제 RC Car 환경에서 Fine-tuning합니다. **이 단계는 라즈베리 파이에서만 실행 가능합니다.**
+
+```bash
+# 사전학습된 모델을 로드하여 전이학습
+python pretrain_carracing.py \
+    --stage transfer \
+    --pretrain-save-path ppo_pretrained.pth \
+    --transfer-steps 50000 \
+    --transfer-save-path ppo_transferred.pth
+```
+
+**주의사항:**
+- ⚠️ 실제 하드웨어 사용 시 안전을 확인하세요!
+- RC Car가 충분한 공간에 있는지 확인
+- 카메라와 모터가 정상 작동하는지 확인
+- 학습 중 모니터링 권장
+
+**전이학습 특징:**
+- 사전학습된 모델을 로드하여 시작
+- 더 작은 학습률 사용 (기본 학습률의 10%)
+- 실제 카메라 이미지로 Fine-tuning
+- 일반적으로 50K~100K 스텝이면 충분
+
+### 3단계: 학습된 모델 테스트
+
+학습된 모델을 실제 RC Car 환경에서 테스트합니다.
+
+```bash
+# 전이학습된 모델 테스트
+python pretrain_carracing.py \
+    --stage test \
+    --transfer-save-path ppo_transferred.pth
+
+# 또는 사전학습 모델만 테스트
+python pretrain_carracing.py \
+    --stage test \
+    --pretrain-save-path ppo_pretrained.pth
+```
+
+**테스트 모드:**
+- 추론만 수행 (학습 없음)
+- 여러 에피소드 실행하여 성능 평가
+- 실제 주행 동작 관찰
+
+### 대안: 직접 train_ppo.py 사용
+
+`pretrain_carracing.py` 대신 `train_ppo.py`를 직접 사용할 수도 있습니다:
+
+```bash
+# CarRacing 환경에서 학습
+python train_ppo.py \
+    --env-type carracing \
+    --use-extended-actions \
+    --total-steps 500000 \
+    --save-path ppo_pretrained.pth \
+    --render  # 시각화 활성화 (선택사항)
+
+# 시뮬레이션 환경에서 학습
+python train_ppo.py \
+    --env-type sim \
+    --use-extended-actions \
+    --total-steps 200000 \
+    --save-path ppo_sim.pth
+```
+
+### 학습 모니터링
+
+학습 중 다음 정보가 출력됩니다:
+- 현재 스텝 수
+- 에피소드 리워드 (평균, 최소, 최대)
+- 에피소드 길이
+- PPO 손실 (Policy Loss, Value Loss)
+- 모델 저장 알림
+
+**학습 성공 지표:**
+- 에피소드 리워드가 점진적으로 증가
+- 에피소드 길이가 증가 (더 오래 주행)
+- 트랙 이탈 빈도 감소
+
+### 문제 해결
+
+**CarRacing 환경 오류:**
+```bash
+# Box2D 설치 확인
+pip install box2d-py
+
+# 또는
+sudo apt-get install swig
+pip install gym[box2d]
+```
+
+**학습이 수렴하지 않음:**
+- 학습률 조정: `--lr-actor 1e-4 --lr-critic 1e-4`
+- 더 많은 스텝 학습: `--pretrain-steps 1000000`
+- 히든 차원 증가: `--hidden-dim 512`
+
+**메모리 부족:**
+- 배치 크기 감소: `--update-frequency 1024`
+- 에피소드 길이 감소: `--max-episode-steps 500`
+
+자세한 내용은 `README_PPO.md`와 `LEARNING_PIPELINE.md`를 참고하세요.
+
 ## 모터 제어 로직
 
 ### 전진 (Forward)

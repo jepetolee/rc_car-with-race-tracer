@@ -266,8 +266,10 @@ def main():
                         help='환경 타입: real(실제 하드웨어-추론전용), sim(시뮬레이션), carracing(Gym CarRacing 사전학습-권장)')
     parser.add_argument('--use-extended-actions', action='store_true', default=True,
                         help='확장된 액션 공간 사용 (전진/후진, 좌회전/우회전) - 연속 액션 모드')
-    parser.add_argument('--use-discrete-actions', action='store_true', default=False,
-                        help='이산 액션 공간 사용 (CarRacing: 0-4)')
+    parser.add_argument('--use-discrete-actions', action='store_true', default=True,
+                        help='이산 액션 공간 사용 (기본값, CarRacing: 0-4)')
+    parser.add_argument('--use-continuous-actions', dest='use_discrete_actions', action='store_false',
+                        help='연속 액션 공간 사용 (이산 액션 비활성화)')
     parser.add_argument('--render', action='store_true',
                         help='환경 렌더링 (시뮬레이션/CarRacing 모드에서만)')
     
@@ -333,7 +335,8 @@ def main():
         
         env = RCCarEnv(
             max_steps=args.max_episode_steps,
-            use_extended_actions=args.use_extended_actions
+            use_extended_actions=args.use_extended_actions,
+            use_discrete_actions=args.use_discrete_actions
         )
         print("=" * 60)
         print("⚠️  실제 하드웨어 환경 사용")
@@ -342,8 +345,8 @@ def main():
         print("=" * 60)
     
     # 에이전트 생성
-    # 이산 액션 모드인지 확인
-    use_discrete = args.use_discrete_actions if args.env_type == 'carracing' else False
+    # 이산 액션 모드인지 확인 (기본값: True)
+    use_discrete = args.use_discrete_actions
     
     agent = PPOAgent(
         state_dim=256,

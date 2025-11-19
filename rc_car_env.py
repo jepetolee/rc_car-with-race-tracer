@@ -23,15 +23,18 @@ class RCCarEnv(gym.Env):
     """
     metadata = {'render.modes': ['human']}
     
-    def __init__(self, max_steps=1000, use_extended_actions=True):
+    def __init__(self, max_steps=1000, use_extended_actions=True, use_discrete_actions=True):
         """
         환경 초기화
         
         Args:
             max_steps: 최대 스텝 수
-            use_extended_actions: 확장된 액션 공간 사용 여부
+            use_extended_actions: 확장된 액션 공간 사용 여부 (연속 액션 모드)
                 - True: [전진/후진, 좌회전/우회전] (rc_car_controller.py 스타일)
                 - False: [left_speed, right_speed] (기존 방식)
+            use_discrete_actions: 이산 액션 공간 사용 여부
+                - True: 이산 액션 (0-4) 사용
+                - False: 연속 액션 사용
         """
         super(RCCarEnv, self).__init__()
         
@@ -46,6 +49,7 @@ class RCCarEnv(gym.Env):
         # RC Car 인터페이스 초기화
         self.rc_car = RC_Car_Interface()
         self.use_extended_actions = use_extended_actions
+        self.use_discrete_actions = use_discrete_actions
         
         # 상태 공간: 16x16 grayscale 이미지 (256 차원)
         self.observation_space = spaces.Box(
@@ -55,7 +59,15 @@ class RCCarEnv(gym.Env):
         )
         
         # 액션 공간
-        if use_extended_actions:
+        if use_discrete_actions:
+            # 이산 액션: 5개 액션
+            # 0: 정지
+            # 1: 전진 직진
+            # 2: 전진 좌회전
+            # 3: 전진 우회전
+            # 4: 후진
+            self.action_space = spaces.Discrete(5)
+        elif use_extended_actions:
             # 확장된 액션: [전진/후진 속도, 좌회전/우회전 각도]
             # 전진/후진: -1.0(후진) ~ 1.0(전진)
             # 좌회전/우회전: -1.0(좌회전) ~ 1.0(우회전)
@@ -92,12 +104,50 @@ class RCCarEnv(gym.Env):
         
         return self.state
     
+    def _discrete_to_continuous(self, discrete_action):
+        """
+        이산 액션을 연속 액션으로 변환
+        
+        Args:
+            discrete_action: 이산 액션 (0-4)
+                0: 정지
+                1: 전진 직진
+                2: 전진 좌회전
+                3: 전진 우회전
+                4: 후진
+        
+        Returns:
+            continuous_action: [전진/후진, 좌회전/우회전] 형태의 연속 액션
+        """
+        speed = 0.7  # 기본 속도 (0.0 ~ 1.0)
+        turn_factor = 0.5  # 회전 강도
+        
+        if discrete_action == 0:
+            # 정지
+            return np.array([0.0, 0.0], dtype=np.float32)
+        elif discrete_action == 1:
+            # 전진 직진
+            return np.array([speed, 0.0], dtype=np.float32)
+        elif discrete_action == 2:
+            # 전진 좌회전
+            return np.array([speed, -turn_factor], dtype=np.float32)
+        elif discrete_action == 3:
+            # 전진 우회전
+            return np.array([speed, turn_factor], dtype=np.float32)
+        elif discrete_action == 4:
+            # 후진
+            return np.array([-speed, 0.0], dtype=np.float32)
+        else:
+            # 기본값: 정지
+            return np.array([0.0, 0.0], dtype=np.float32)
+    
     def step(self, action):
         """
         환경 스텝 실행
         
         Args:
-            action: 액션 벡터
+            action: 액션
+                - use_discrete_actions=True: 정수 (0-4)
                 - use_extended_actions=True: [전진/후진, 좌회전/우회전]
                 - use_extended_actions=False: [left_speed, right_speed]
         
@@ -107,7 +157,18 @@ class RCCarEnv(gym.Env):
             done: 종료 여부
             info: 추가 정보
         """
-        if self.use_extended_actions:
+        # 이산 액션을 연속 액션으로 변환
+        if self.use_discrete_actions:
+            if isinstance(action, (list, np.ndarray)):
+                discrete_action = int(action[0]) if len(action) > 0 else int(action)
+            else:
+                discrete_action = int(action)
+            action = self._discrete_to_continuous(discrete_action)
+            original_action = discrete_action
+        else:
+            original_action = action
+        
+        if self.use_extended_actions or self.use_discrete_actions:
             # 확장된 액션 해석
             forward_backward = action[0]  # -1.0(후진) ~ 1.0(전진)
             left_right = action[1]  # -1.0(좌회전) ~ 1.0(우회전)
@@ -157,7 +218,8 @@ class RCCarEnv(gym.Env):
             'step': self.current_step,
             'left_speed': left_speed,
             'right_speed': right_speed,
-            'action_type': 'extended' if self.use_extended_actions else 'basic'
+            'action_type': 'discrete' if self.use_discrete_actions else ('extended' if self.use_extended_actions else 'basic'),
+            'original_action': original_action if self.use_discrete_actions else None
         }
         
         return next_state, reward, done, info
@@ -168,7 +230,7 @@ class RCCarEnv(gym.Env):
         
         Args:
             img: 현재 카메라 이미지 (16x16)
-            action: 선택한 액션
+            action: 선택한 액션 (연속 액션 형태)
         
         Returns:
             reward: 계산된 리워드
@@ -202,6 +264,10 @@ class RCCarEnv(gym.Env):
         # 5. 페널티: 너무 느리거나 멈춤
         if speed < 0.1:
             reward -= 0.5
+        
+        # 6. 이산 액션 모드에서 전진 액션 보너스
+        if self.use_discrete_actions and abs(action[0]) > 0.5:
+            reward += 0.1  # 전진 액션에 작은 보너스
         
         return reward
     
