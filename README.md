@@ -128,6 +128,46 @@ sudo apt-get install python3-picamera2
 pip install opencv-python numpy
 ```
 
+**Important: Virtual Environment Configuration**
+
+`picamera2` is installed as a system package (via `apt`), not via `pip`. If you're using a virtual environment, you need to configure it to access system site packages:
+
+**Option 1: Recreate virtual environment with system site packages (Recommended)**
+```bash
+# Deactivate current virtual environment
+deactivate
+
+# Remove old virtual environment (if needed)
+rm -rf venv  # or your venv directory name
+
+# Create new virtual environment with system site packages
+python3 -m venv --system-site-packages venv
+
+# Activate the new virtual environment
+source venv/bin/activate
+
+# Verify picamera2 is accessible
+python3 -c "import picamera2; print('picamera2 imported successfully')"
+```
+
+**Option 2: Use system Python directly (outside virtual environment)**
+```bash
+# Deactivate virtual environment
+deactivate
+
+# Run scripts with system Python
+python3 raspberry_pi_camera.py --mode preview
+```
+
+**Option 3: Enable system site packages in existing virtual environment**
+```bash
+# Edit your virtual environment's pyvenv.cfg file
+# Change: include-system-site-packages = false
+# To:     include-system-site-packages = true
+
+# Or recreate as shown in Option 1
+```
+
 **Note:** This codebase uses `picamera2`, which is the standard camera library for modern Raspberry Pi OS. If you're using an older Raspberry Pi OS that only supports the legacy `picamera` module, you would need to use an older version of the code or upgrade your OS.
 
 ### Camera Test Script
@@ -228,6 +268,24 @@ sudo usermod -a -G video $USER
 ```
 
 **Import errors:**
+
+*"picamera2 module not found" in virtual environment:*
+- `picamera2` is a system package, not installable via `pip`
+- If using a virtual environment, recreate it with `--system-site-packages` flag:
+  ```bash
+  deactivate
+  rm -rf venv
+  python3 -m venv --system-site-packages venv
+  source venv/bin/activate
+  ```
+- Or use system Python directly (outside virtual environment):
+  ```bash
+  deactivate
+  python3 raspberry_pi_camera.py --mode preview
+  ```
+- Verify installation: `python3 -c "import picamera2; print(picamera2.__file__)"`
+
+*Other import issues:*
 - Ensure you're running on Raspberry Pi (picamera2 only works on Raspberry Pi)
 - Check Python version: `python3 --version` (should be 3.7+)
 - Install picamera2: `sudo apt install python3-picamera2`
