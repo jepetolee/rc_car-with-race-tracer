@@ -115,16 +115,20 @@ car.close()
 
 ### Installation
 
-The camera functionality requires the `picamera` module, which is typically pre-installed on Raspberry Pi OS. If not available:
+The camera functionality requires the `picamera2` module, which is the modern camera library for Raspberry Pi OS (Bullseye and later).
 
+**Install picamera2:**
 ```bash
-# Install picamera module
 sudo apt-get update
-sudo apt-get install python3-picamera
+sudo apt-get install python3-picamera2
+```
 
-# Install OpenCV for image processing
+**Install OpenCV for image processing:**
+```bash
 pip install opencv-python numpy
 ```
+
+**Note:** This codebase uses `picamera2`, which is the standard camera library for modern Raspberry Pi OS. If you're using an older Raspberry Pi OS that only supports the legacy `picamera` module, you would need to use an older version of the code or upgrade your OS.
 
 ### Camera Test Script
 
@@ -224,8 +228,10 @@ sudo usermod -a -G video $USER
 ```
 
 **Import errors:**
-- Ensure you're running on Raspberry Pi (picamera only works on Raspberry Pi)
-- Check Python version: `python3 --version` (should be 3.5+)
+- Ensure you're running on Raspberry Pi (picamera2 only works on Raspberry Pi)
+- Check Python version: `python3 --version` (should be 3.7+)
+- Install picamera2: `sudo apt install python3-picamera2`
+- Ensure camera is enabled: `sudo raspi-config` > Interface Options > Camera > Enable
 
 ## 모터 제어 로직
 

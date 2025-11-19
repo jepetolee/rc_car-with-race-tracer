@@ -17,13 +17,12 @@ import argparse
 import sys
 
 try:
-    from picamera import PiCamera
-    from picamera.array import PiRGBArray
-    HAS_PICAMERA = True
+    from picamera2 import Picamera2
+    HAS_PICAMERA2 = True
 except ImportError:
-    HAS_PICAMERA = False
-    print("Warning: picamera module not found. This script requires Raspberry Pi with picamera module.")
-    print("Install with: sudo apt-get install python3-picamera")
+    HAS_PICAMERA2 = False
+    print("Warning: picamera2 module not found. This script requires Raspberry Pi with picamera2 module.")
+    print("Install with: sudo apt-get install python3-picamera2")
     sys.exit(1)
 
 
@@ -35,23 +34,25 @@ class RaspberryPiCamera:
         Args:
             resolution: Camera resolution (width, height)
             framerate: Frame rate (fps)
-            grayscale: If True, set camera to grayscale mode
+            grayscale: If True, convert images to grayscale during processing
         """
-        self.camera = PiCamera()
-        self.camera.resolution = resolution
-        self.camera.framerate = framerate
-        
-        if grayscale:
-            self.camera.color_effects = (128, 128)  # Set to black and white
-        
+        self.camera = Picamera2()
         self.resolution = resolution
+        self.framerate = framerate
         self.grayscale = grayscale
+        
+        # Configure camera for video preview
+        video_config = self.camera.create_video_configuration(
+            main={"size": resolution, "format": "RGB888"}
+        )
+        self.camera.configure(video_config)
+        self.camera.start()
         
         # Warm up camera
         time.sleep(2)
         print(f"Camera initialized: {resolution[0]}x{resolution[1]} @ {framerate}fps")
         if grayscale:
-            print("Grayscale mode enabled")
+            print("Grayscale mode enabled (processing)")
     
     def capture_image(self, save_path=None):
         """
@@ -61,16 +62,19 @@ class RaspberryPiCamera:
             save_path: Optional path to save image (if None, returns image array)
         
         Returns:
-            numpy array of image (BGR format)
+            numpy array of image (RGB format)
         """
-        img = np.empty((self.resolution[1], self.resolution[0], 3), dtype=np.uint8)
-        self.camera.capture(img, 'bgr')
+        # Capture array from camera
+        img = self.camera.capture_array()
+        
+        # Convert RGB to BGR for OpenCV compatibility
+        img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
         
         if save_path:
-            cv2.imwrite(save_path, img)
+            cv2.imwrite(save_path, img_bgr)
             print(f"Image saved to: {save_path}")
         
-        return img
+        return img_bgr
     
     def get_image_grayscale(self):
         """
@@ -79,14 +83,11 @@ class RaspberryPiCamera:
         Returns:
             16x16 grayscale image array
         """
-        img = np.empty((self.resolution[1], self.resolution[0], 3), dtype=np.uint8)
-        self.camera.capture(img, 'bgr')
+        # Capture image from camera
+        img = self.camera.capture_array()
         
-        # Convert to grayscale (if not already)
-        if not self.grayscale:
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        else:
-            img = img[:, :, 0]  # All channels are same in grayscale mode
+        # Convert RGB to grayscale
+        img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
         
         # Apply threshold
         threshold = int(np.mean(img)) * 0.5
@@ -105,24 +106,27 @@ class RaspberryPiCamera:
             duration: Preview duration in seconds (None for infinite)
             show_processed: If True, also show processed 16x16 image
         """
-        raw_capture = PiRGBArray(self.camera, size=self.resolution)
-        
         start_time = time.time()
         print("Starting video preview. Press 'q' to quit, 's' to save snapshot")
         
         try:
-            for frame in self.camera.capture_continuous(raw_capture, format="bgr", use_video_port=True):
+            for frame in self.camera.frames():
+                # Get frame array (RGB format)
                 image = frame.array
                 
-                # Display original image
-                display_img = image.copy()
+                # Convert RGB to BGR for OpenCV display
+                display_img = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+                
+                # Convert to grayscale if requested
                 if self.grayscale:
-                    display_img = cv2.cvtColor(image[:, :, 0], cv2.COLOR_GRAY2BGR)
+                    gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+                    display_img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
                 
                 cv2.imshow("Raspberry Pi Camera - Original", display_img)
                 
                 # Display processed image if requested
                 if show_processed:
+                    # Get processed image (this will capture a new frame)
                     processed = self.get_image_grayscale()
                     processed_display = cv2.resize(processed, (320, 320), interpolation=cv2.INTER_NEAREST)
                     processed_display = cv2.cvtColor(processed_display, cv2.COLOR_GRAY2BGR)
@@ -138,9 +142,6 @@ class RaspberryPiCamera:
                     cv2.imwrite(filename, display_img)
                     print(f"Snapshot saved: {filename}")
                 
-                # Clear stream for next frame
-                raw_capture.truncate(0)
-                
                 # Check duration
                 if duration and (time.time() - start_time) >= duration:
                     break
@@ -152,7 +153,9 @@ class RaspberryPiCamera:
     
     def close(self):
         """Close camera"""
-        self.camera.close()
+        if hasattr(self, 'camera') and self.camera:
+            self.camera.stop()
+            self.camera.close()
         print("Camera closed")
 
 
@@ -186,8 +189,8 @@ def main():
         sys.exit(1)
     
     # Check if running on Raspberry Pi
-    if not HAS_PICAMERA:
-        print("Error: picamera module is required. This script must run on Raspberry Pi.")
+    if not HAS_PICAMERA2:
+        print("Error: picamera2 module is required. This script must run on Raspberry Pi.")
         sys.exit(1)
     
     # Initialize camera
