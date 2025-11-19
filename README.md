@@ -111,6 +111,122 @@ car.stop()
 car.close()
 ```
 
+## Raspberry Pi Camera
+
+### Installation
+
+The camera functionality requires the `picamera` module, which is typically pre-installed on Raspberry Pi OS. If not available:
+
+```bash
+# Install picamera module
+sudo apt-get update
+sudo apt-get install python3-picamera
+
+# Install OpenCV for image processing
+pip install opencv-python numpy
+```
+
+### Camera Test Script
+
+A standalone camera test script (`raspberry_pi_camera.py`) is provided to test and display the Raspberry Pi camera feed.
+
+#### 1. Video Preview Mode
+
+Display real-time video feed from the camera:
+
+```bash
+python raspberry_pi_camera.py --mode preview
+```
+
+Options:
+- `--resolution WIDTH,HEIGHT`: Set camera resolution (default: 320,320)
+- `--framerate FPS`: Set frame rate (default: 30)
+- `--grayscale`: Enable grayscale mode
+- `--duration SECONDS`: Preview duration (default: infinite)
+- `--show-processed`: Also display processed 16x16 image
+
+Controls:
+- Press `q` to quit
+- Press `s` to save a snapshot
+
+Example:
+```bash
+# Preview with grayscale and processed image
+python raspberry_pi_camera.py --mode preview --grayscale --show-processed
+
+# Preview for 10 seconds
+python raspberry_pi_camera.py --mode preview --duration 10
+```
+
+#### 2. Single Image Capture
+
+Capture a single image:
+
+```bash
+python raspberry_pi_camera.py --mode capture --output image.jpg
+```
+
+#### 3. Processed Image Test
+
+Test the image processing pipeline (similar to `rc_car_interface.py`):
+
+```bash
+python raspberry_pi_camera.py --mode test --output processed.jpg
+```
+
+This mode:
+- Captures an image
+- Converts to grayscale
+- Applies threshold
+- Resizes to 16x16
+- Displays and optionally saves the result
+
+### Camera Integration
+
+The camera is integrated into the RC Car system through `rc_car_interface.py`:
+
+```python
+from rc_car_interface import RC_Car_Interface
+
+# Initialize interface (includes camera)
+rc_car = RC_Car_Interface()
+
+# Get processed image (16x16 grayscale)
+image = rc_car.get_image_from_camera()
+
+# Use image for AI/ML processing
+```
+
+The camera interface:
+- Resolution: 320x320
+- Grayscale mode enabled
+- Output: 16x16 processed binary image
+- Compatible with reinforcement learning environments
+
+### Troubleshooting
+
+**Camera not detected:**
+```bash
+# Check if camera is enabled
+sudo raspi-config
+# Navigate to: Interface Options > Camera > Enable
+
+# Check camera module
+vcgencmd get_camera
+# Should return: supported=1 detected=1
+```
+
+**Permission errors:**
+```bash
+# Add user to video group
+sudo usermod -a -G video $USER
+# Log out and log back in
+```
+
+**Import errors:**
+- Ensure you're running on Raspberry Pi (picamera only works on Raspberry Pi)
+- Check Python version: `python3 --version` (should be 3.5+)
+
 ## 모터 제어 로직
 
 ### 전진 (Forward)

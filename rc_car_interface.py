@@ -1,4 +1,4 @@
-하하# Copyright(c) Reserved 2020.
+# Copyright(c) Reserved 2020.
 # Donghee Lee, University of Soul
 #
 __author__ = 'will'
