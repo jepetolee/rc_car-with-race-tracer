@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 """
-Teacher Forcing을 사용한 사전 학습
-사람이 직접 조작한 데이터로 모델을 사전 학습한 후 강화학습으로 fine-tuning
+Supervised Learning (Teacher Forcing)을 사용한 사전 학습
+사람이 직접 조작한 데이터로 모델을 supervised learning으로 사전 학습한 후 강화학습으로 fine-tuning
+
+Teacher Forcing = Supervised Learning:
+- 사람이 조작한 (상태, 액션) 쌍을 사용
+- Maximum Likelihood Estimation (MLE)으로 정책 학습
+- 실제 액션의 로그 확률을 최대화하는 방식
 
 사용법:
-    # 1단계: Teacher Forcing 사전 학습
+    # 1단계: Supervised Learning 사전 학습
     python train_with_teacher_forcing.py --demos human_demos.pkl --pretrain-epochs 100
     
     # 2단계: 강화학습으로 fine-tuning
@@ -39,8 +44,13 @@ except ImportError:
 
 class TeacherForcingTrainer:
     """
-    Teacher Forcing을 사용한 사전 학습 클래스
-    사람이 직접 조작한 데이터로 정책을 학습
+    Supervised Learning (Teacher Forcing)을 사용한 사전 학습 클래스
+    사람이 직접 조작한 (상태, 액션) 쌍으로 정책을 supervised learning으로 학습
+    
+    학습 방식:
+    - Maximum Likelihood Estimation (MLE)
+    - Loss = -log P(실제_액션 | 상태)
+    - 실제 액션의 로그 확률을 최대화
     """
     
     def __init__(
@@ -146,8 +156,9 @@ class TeacherForcingTrainer:
                     actions_tensor
                 )
             
-            # Negative log likelihood loss (최대 우도 추정)
-            # Teacher forcing: 실제 액션의 로그 확률을 최대화
+            # Supervised Learning: Negative log likelihood loss (최대 우도 추정)
+            # 사람이 조작한 실제 액션의 로그 확률을 최대화
+            # Loss = -log P(실제_액션 | 상태) → 최소화하면 P(실제_액션 | 상태) 최대화
             loss = -log_probs.mean()
             
             # 역전파
@@ -170,7 +181,9 @@ class TeacherForcingTrainer:
         verbose: bool = True
     ):
         """
-        Teacher Forcing 사전 학습
+        Supervised Learning (Teacher Forcing) 사전 학습
+        
+        사람이 조작한 (상태, 액션) 쌍을 사용하여 정책을 supervised learning으로 학습
         
         Args:
             epochs: 학습 에폭 수
@@ -183,7 +196,7 @@ class TeacherForcingTrainer:
             final_loss: 최종 손실
         """
         print(f"\n{'='*60}")
-        print("Teacher Forcing 사전 학습 시작")
+        print("Supervised Learning (Teacher Forcing) 사전 학습 시작")
         print(f"{'='*60}")
         print(f"에폭 수: {epochs}")
         print(f"배치 크기: {batch_size}")
@@ -223,7 +236,7 @@ class TeacherForcingTrainer:
             writer.close()
         
         print(f"\n{'='*60}")
-        print("Teacher Forcing 사전 학습 완료")
+        print("Supervised Learning (Teacher Forcing) 사전 학습 완료")
         print(f"{'='*60}")
         print(f"최종 손실: {best_loss:.6f}")
         print(f"모델 저장: {save_path}")
@@ -256,11 +269,11 @@ def load_demonstrations(filepath: str):
 def main():
     """메인 함수"""
     parser = argparse.ArgumentParser(
-        description='Teacher Forcing을 사용한 사전 학습 및 강화학습',
+        description='Supervised Learning (Teacher Forcing)을 사용한 사전 학습 및 강화학습',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 사용 예시:
-  # 1단계: Teacher Forcing 사전 학습만
+  # 1단계: Supervised Learning 사전 학습만
   python train_with_teacher_forcing.py --demos human_demos.pkl --pretrain-epochs 100
   
   # 2단계: 사전 학습 + 강화학습 fine-tuning
@@ -277,9 +290,9 @@ def main():
     parser.add_argument('--load', type=str, default=None,
                         help='사전 학습된 모델 경로 (사전 학습 생략 시)')
     
-    # Teacher Forcing 설정
+    # Supervised Learning (Teacher Forcing) 설정
     parser.add_argument('--pretrain-epochs', type=int, default=0,
-                        help='Teacher Forcing 사전 학습 에폭 수 (0이면 생략)')
+                        help='Supervised Learning 사전 학습 에폭 수 (0이면 생략)')
     parser.add_argument('--pretrain-batch-size', type=int, default=64,
                         help='사전 학습 배치 크기 (기본: 64)')
     parser.add_argument('--pretrain-lr', type=float, default=3e-4,
@@ -342,10 +355,10 @@ def main():
         else:
             print(f"⚠️  모델 파일을 찾을 수 없습니다: {args.load}")
     
-    # Teacher Forcing 사전 학습
+    # Supervised Learning (Teacher Forcing) 사전 학습
     if args.pretrain_epochs > 0:
         if args.demos is None:
-            print("❌ Teacher Forcing을 사용하려면 --demos 옵션이 필요합니다.")
+            print("❌ Supervised Learning을 사용하려면 --demos 옵션이 필요합니다.")
             sys.exit(1)
         
         if not os.path.exists(args.demos):
@@ -356,7 +369,7 @@ def main():
         demo_data = load_demonstrations(args.demos)
         demonstrations = demo_data['demonstrations']
         
-        # Teacher Forcing 학습
+        # Supervised Learning 학습
         trainer = TeacherForcingTrainer(
             agent=agent,
             demonstrations=demonstrations,

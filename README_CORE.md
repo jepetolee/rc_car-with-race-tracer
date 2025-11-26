@@ -32,7 +32,8 @@ python collect_human_demonstrations.py \
     --output human_demos.pkl \
     --episodes 5
 
-# 2-2. Teacher Forcing 사전 학습
+# 2-2. Supervised Learning 사전 학습 (Teacher Forcing)
+# 사람이 조작한 (상태, 액션) 쌍으로 Maximum Likelihood Estimation 수행
 python train_with_teacher_forcing.py \
     --demos human_demos.pkl \
     --pretrain-epochs 100 \
@@ -92,7 +93,7 @@ python train_ppo.py --env-type carracing --total-steps 100000
 # 2단계: 사람 조작 데이터 수집
 python collect_human_demonstrations.py --env-type real --port /dev/ttyACM0 --episodes 5
 
-# 3단계: Teacher Forcing 사전 학습
+# 3단계: Supervised Learning 사전 학습 (Teacher Forcing)
 python train_with_teacher_forcing.py --demos human_demos.pkl --pretrain-epochs 100
 
 # 4단계: 사람 평가 기반 강화학습

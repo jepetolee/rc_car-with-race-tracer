@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 사람이 직접 조작한 데이터 수집 스크립트
-Teacher Forcing을 위한 데모 데이터 수집
+Supervised Learning (Teacher Forcing)을 위한 데모 데이터 수집
 
 사용법:
     python collect_human_demonstrations.py --port /dev/ttyACM0 --output demos.pkl
@@ -187,7 +187,9 @@ class HumanDemonstrationCollector:
                 episode_data['timestamps'].append(time.time())
                 
                 # 키보드 입력 확인 (논블로킹)
-                action = None
+                # 기본값: 정지 (키 입력이 없으면 항상 정지)
+                action = 0
+                
                 if select.select([sys.stdin], [], [], 0)[0]:
                     key = sys.stdin.read(1)
                     
@@ -209,18 +211,7 @@ class HumanDemonstrationCollector:
                     elif key == 'x':
                         action = 4  # 브레이크
                         print(f"[Step {step+1}] Action: Brake")
-                    else:
-                        # 키 입력이 없으면 이전 액션 유지 (또는 정지)
-                        if step == 0:
-                            action = 0  # 첫 스텝은 정지
-                        else:
-                            action = episode_data['actions'][-1]  # 이전 액션 유지
-                else:
-                    # 키 입력이 없으면 이전 액션 유지
-                    if step == 0:
-                        action = 0  # 첫 스텝은 정지
-                    else:
-                        action = episode_data['actions'][-1]  # 이전 액션 유지
+                    # 알 수 없는 키는 무시 (action = 0 유지)
                 
                 # 실제 하드웨어 제어
                 if self.controller is not None and action is not None:
@@ -333,7 +324,7 @@ class HumanDemonstrationCollector:
 def main():
     """메인 함수"""
     parser = argparse.ArgumentParser(
-        description='사람이 직접 조작한 데이터 수집 (Teacher Forcing용)',
+        description='사람이 직접 조작한 데이터 수집 (Supervised Learning용)',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 사용 예시:
