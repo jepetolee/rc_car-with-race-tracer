@@ -7,6 +7,13 @@ AI 에이전트 실행 스크립트
     python run_ai_agent.py --model ppo_model.pth --port /dev/ttyACM0 --delay 0.1
 """
 
+import os
+# NumPy 임포트 전에 환경 변수 설정 (Bus error 방지)
+os.environ['OPENBLAS_NUM_THREADS'] = '1'
+os.environ['MKL_NUM_THREADS'] = '1'
+os.environ['NUMEXPR_NUM_THREADS'] = '1'
+os.environ['OMP_NUM_THREADS'] = '1'
+
 import argparse
 import numpy as np
 import torch

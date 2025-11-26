@@ -14,10 +14,23 @@ print("=" * 60)
 # 1단계: 기본 임포트
 print("\n[1단계] 기본 모듈 임포트...")
 try:
+    # NumPy 임포트 전에 환경 변수 설정 (메모리 정렬 문제 방지)
+    import os
+    os.environ['OPENBLAS_NUM_THREADS'] = '1'
+    os.environ['MKL_NUM_THREADS'] = '1'
+    os.environ['NUMEXPR_NUM_THREADS'] = '1'
+    os.environ['OMP_NUM_THREADS'] = '1'
+    
+    print("   환경 변수 설정 완료")
+    print("   NumPy 임포트 시도 중...")
+    
     import numpy as np
-    print("✅ numpy 임포트 성공")
+    print(f"✅ numpy 임포트 성공 (버전: {np.__version__})")
+    print(f"   NumPy 설정: {np.show_config()}")
 except Exception as e:
     print(f"❌ numpy 임포트 실패: {e}")
+    import traceback
+    traceback.print_exc()
     sys.exit(1)
 
 try:

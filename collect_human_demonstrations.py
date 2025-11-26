@@ -7,6 +7,13 @@ Supervised Learning (Teacher Forcing)을 위한 데모 데이터 수집
     python collect_human_demonstrations.py --port /dev/ttyACM0 --output demos.pkl
 """
 
+import os
+# NumPy 임포트 전에 환경 변수 설정 (Bus error 방지)
+os.environ['OPENBLAS_NUM_THREADS'] = '1'
+os.environ['MKL_NUM_THREADS'] = '1'
+os.environ['NUMEXPR_NUM_THREADS'] = '1'
+os.environ['OMP_NUM_THREADS'] = '1'
+
 import argparse
 import numpy as np
 import pickle

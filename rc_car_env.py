@@ -4,6 +4,13 @@ RC Car 강화학습 환경
 rc_car_interface.py를 기반으로 Gym 스타일 환경 구현
 """
 
+import os
+# NumPy 임포트 전에 환경 변수 설정 (Bus error 방지)
+os.environ['OPENBLAS_NUM_THREADS'] = '1'
+os.environ['MKL_NUM_THREADS'] = '1'
+os.environ['NUMEXPR_NUM_THREADS'] = '1'
+os.environ['OMP_NUM_THREADS'] = '1'
+
 import numpy as np
 import gym
 from gym import spaces
