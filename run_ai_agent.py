@@ -77,23 +77,43 @@ class AIAgentRunner:
         print(f"액션 지연 시간: {action_delay:.3f}초")
         print(f"환경 타입: {env_type}")
         
-        # 환경 생성
-        self.env = self._create_env()
+        # 단계별 초기화 (Bus error 방지)
+        print("\n[초기화 단계 1/4] 환경 생성 중...")
+        try:
+            self.env = self._create_env()
+            print("✅ 환경 생성 완료")
+        except Exception as e:
+            print(f"❌ 환경 생성 실패: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
         
-        # 에이전트 생성 및 모델 로드
-        self.agent = self._load_agent()
-        
-        # 실제 하드웨어 제어기 (real 모드일 때만)
+        # 하드웨어 제어기 생성 (real 모드일 때만)
+        print("\n[초기화 단계 2/4] 하드웨어 제어기 연결 중...")
         self.controller = None
         if env_type == 'real':
             try:
                 self.controller = RCCarController(port=port, delay=action_delay)
-                print(f"실제 하드웨어 연결: {port}")
+                print(f"✅ 실제 하드웨어 연결: {port}")
             except Exception as e:
                 print(f"⚠️  실제 하드웨어 연결 실패: {e}")
                 print("시뮬레이션 모드로 전환합니다.")
                 self.env_type = 'sim'
                 self.env = self._create_env()
+        
+        # 에이전트 생성 및 모델 로드
+        print("\n[초기화 단계 3/4] 에이전트 생성 중...")
+        try:
+            self.agent = self._load_agent()
+            print("✅ 에이전트 생성 완료")
+        except Exception as e:
+            print(f"❌ 에이전트 생성 실패: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
+        
+        print("\n[초기화 단계 4/4] 초기화 완료!")
+        print("=" * 60)
     
     def _create_env(self):
         """환경 생성"""

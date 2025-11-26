@@ -148,6 +148,9 @@ class HumanDemonstrationCollector:
         print("  s: 정지 (Action 0)")
         print("  x: 브레이크 (Action 4)")
         print("  q: 에피소드 종료")
+        print(f"{'='*60}")
+        print("💡 중요: 키를 누를 때만 이미지가 캡처됩니다!")
+        print("   키를 누르지 않으면 데이터가 수집되지 않습니다.")
         print(f"{'='*60}\n")
         
         # 환경 리셋
@@ -179,62 +182,74 @@ class HumanDemonstrationCollector:
             tty.setraw(sys.stdin.fileno())
             
             print("조작을 시작하세요... (q로 종료)")
+            print("💡 팁: 키를 누를 때만 이미지가 캡처됩니다!")
             
-            for step in range(self.max_steps):
-                # 상태 저장
-                state_normalized = state.astype(np.float32) / 255.0
-                episode_data['states'].append(state_normalized.copy())
-                episode_data['timestamps'].append(time.time())
-                
+            step = 0
+            last_action = 0  # 마지막 액션 저장
+            
+            while step < self.max_steps:
                 # 키보드 입력 확인 (논블로킹)
-                # 기본값: 정지 (키 입력이 없으면 항상 정지)
-                action = 0
+                action = None
+                key_pressed = False
                 
                 if select.select([sys.stdin], [], [], 0)[0]:
                     key = sys.stdin.read(1)
+                    key_pressed = True
                     
                     if key == 'q':
                         print("\n에피소드 종료 요청")
                         break
                     elif key == 'w':
                         action = 3  # 전진
-                        print(f"[Step {step+1}] Action: Gas (Forward)")
+                        print(f"[데이터 {len(episode_data['states'])+1}] Action: Gas (Forward)")
                     elif key == 'a':
                         action = 2  # 좌회전+가스
-                        print(f"[Step {step+1}] Action: Left + Gas")
+                        print(f"[데이터 {len(episode_data['states'])+1}] Action: Left + Gas")
                     elif key == 'd':
                         action = 1  # 우회전+가스
-                        print(f"[Step {step+1}] Action: Right + Gas")
+                        print(f"[데이터 {len(episode_data['states'])+1}] Action: Right + Gas")
                     elif key == 's':
                         action = 0  # 정지
-                        print(f"[Step {step+1}] Action: Stop")
+                        print(f"[데이터 {len(episode_data['states'])+1}] Action: Stop")
                     elif key == 'x':
                         action = 4  # 브레이크
-                        print(f"[Step {step+1}] Action: Brake")
-                    # 알 수 없는 키는 무시 (action = 0 유지)
+                        print(f"[데이터 {len(episode_data['states'])+1}] Action: Brake")
                 
-                # 실제 하드웨어 제어
-                if self.controller is not None and action is not None:
-                    self.controller.execute_discrete_action(action)
-                
-                # 환경 스텝
-                next_state, reward, done, info = self.env.step(action)
-                
-                # 데이터 저장
-                episode_data['actions'].append(action)
-                episode_data['rewards'].append(reward)
-                episode_data['dones'].append(done)
-                
-                episode_reward += reward
-                episode_length += 1
-                
-                # 0.1초 지연
-                time.sleep(self.action_delay)
-                
-                if done:
-                    break
-                
-                state = next_state
+                # 키를 눌렀을 때만 이미지 캡처 및 데이터 저장
+                if key_pressed and action is not None:
+                    # 현재 상태 저장 (키를 누른 순간의 이미지)
+                    state_normalized = state.astype(np.float32) / 255.0
+                    episode_data['states'].append(state_normalized.copy())
+                    episode_data['timestamps'].append(time.time())
+                    
+                    # 실제 하드웨어 제어
+                    if self.controller is not None:
+                        self.controller.execute_discrete_action(action)
+                    
+                    # 환경 스텝
+                    next_state, reward, done, info = self.env.step(action)
+                    
+                    # 데이터 저장
+                    episode_data['actions'].append(action)
+                    episode_data['rewards'].append(reward)
+                    episode_data['dones'].append(done)
+                    
+                    episode_reward += reward
+                    episode_length += 1
+                    step += 1
+                    last_action = action
+                    
+                    # 다음 상태로 업데이트
+                    state = next_state
+                    
+                    # 액션 지연
+                    time.sleep(self.action_delay)
+                    
+                    if done:
+                        break
+                else:
+                    # 키 입력이 없으면 짧은 대기 (CPU 사용량 감소)
+                    time.sleep(0.05)
             
             # 터미널 설정 복원
             termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
