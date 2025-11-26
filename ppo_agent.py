@@ -696,11 +696,16 @@ class PPOAgent:
         running_return = 0
         
         # 역순으로 리턴 계산 (에피소드 경계 고려)
+        # 중요: done 체크 전에 리턴을 계산해야 함
         for step in reversed(range(n)):
-            if dones[step]:
-                running_return = 0  # 에피소드 종료 시 리셋
+            # 먼저 현재 스텝의 리턴 계산
             running_return = rewards[step] + self.gamma * running_return
             returns[step] = running_return
+            
+            # 에피소드 종료 시 다음 에피소드를 위해 리셋
+            # (다음 반복에서 이전 에피소드의 리턴이 누적되지 않도록)
+            if dones[step]:
+                running_return = 0
         
         # 어드밴티지 = MC 리턴 - 가치 추정치
         advantages = [r - v for r, v in zip(returns, values)]

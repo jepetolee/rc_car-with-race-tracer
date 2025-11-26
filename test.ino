@@ -8,7 +8,7 @@ AF_DCMotor motor2(2);
 String command = "";
 char commandType = 'S';  // F: Forward, L: Left+Gas, R: Right+Gas, S: Stop, X: Brake
 int speedValue = 0;
-const unsigned long COMMAND_DURATION_MS = 200;  // 빠른 반응을 위해 200ms로 단축
+const unsigned long COMMAND_DURATION_MS = 100;  // 최소 명령 지속 시간: 100ms (0.1초)
 bool commandActive = false;
 unsigned long commandStartTime = 0;
 
@@ -39,13 +39,38 @@ void loop() {
     
     if (command.length() > 0) {
       // 이산 액션 명령어 지원 (0-4)
-      // A0: 정지, A1: 우회전+가스, A2: 좌회전+가스, A3: 직진, A4: 브레이크
+      // 형식 1: "A0", "A1" (A 접두사)
+      // 형식 2: "0", "1" (숫자만)
       if (command.charAt(0) == 'A') {
-        // 이산 액션 모드
+        // 이산 액션 모드 (A 접두사)
         int actionNum = command.substring(1).toInt();
-        executeDiscreteAction(actionNum);
-        commandActive = true;
-        commandStartTime = millis();
+        if (actionNum >= 0 && actionNum <= 4) {
+          executeDiscreteAction(actionNum);
+          // 정지 액션(0, 4)은 자동 정지 타이머 비활성화
+          if (actionNum == 0 || actionNum == 4) {
+            commandActive = false;
+          } else {
+            commandActive = true;
+            commandStartTime = millis();
+          }
+        } else {
+          Serial.println("Invalid action number (0-4)");
+        }
+      } else if (isDigit(command.charAt(0))) {
+        // 숫자만 오는 경우 (0-4 직접 입력)
+        int actionNum = command.toInt();
+        if (actionNum >= 0 && actionNum <= 4) {
+          executeDiscreteAction(actionNum);
+          // 정지 액션(0, 4)은 자동 정지 타이머 비활성화
+          if (actionNum == 0 || actionNum == 4) {
+            commandActive = false;
+          } else {
+            commandActive = true;
+            commandStartTime = millis();
+          }
+        } else {
+          Serial.println("Invalid action number (0-4)");
+        }
       } else {
         // 기존 명령어 형식: [F/L/R/S/X][속도]
         commandType = command.charAt(0);

@@ -435,12 +435,9 @@ def main():
     # 환경 선택
     parser.add_argument('--env-type', choices=['real', 'sim', 'carracing'], default='carracing',
                         help='환경 타입: real(실제 하드웨어-추론전용), sim(시뮬레이션), carracing(Gym CarRacing 사전학습-권장)')
-    parser.add_argument('--use-extended-actions', action='store_true', default=True,
-                        help='확장된 액션 공간 사용 (전진/후진, 좌회전/우회전) - 연속 액션 모드')
+    # 이산 액션만 사용 (고정)
     parser.add_argument('--use-discrete-actions', action='store_true', default=True,
-                        help='이산 액션 공간 사용 (기본값, CarRacing: 0-4)')
-    parser.add_argument('--use-continuous-actions', dest='use_discrete_actions', action='store_false',
-                        help='연속 액션 공간 사용 (이산 액션 비활성화)')
+                        help='이산 액션 공간 사용 (항상 True)')
     parser.add_argument('--render', action='store_true',
                         help='환경 렌더링 (시뮬레이션/CarRacing 모드에서만)')
     
@@ -460,14 +457,14 @@ def main():
     print(f"환경 타입: {args.env_type}")
     print(f"확장된 액션 공간: {args.use_extended_actions}")
     
-    # 환경 생성
+    # 환경 생성 (이산 액션만 사용)
     if args.env_type == 'carracing':
         # Gym CarRacing 환경 (사전학습용)
         try:
             env = CarRacingEnvWrapper(
                 max_steps=args.max_episode_steps,
-                use_extended_actions=args.use_extended_actions,
-                use_discrete_actions=args.use_discrete_actions
+                use_extended_actions=True,
+                use_discrete_actions=True  # 이산 액션만
             )
             print("=" * 60)
             print("Gym CarRacing 환경 사용 - 사전학습 권장")
@@ -489,7 +486,8 @@ def main():
         env = RCCarSimEnv(
             max_steps=args.max_episode_steps,
             render_mode=render_mode,
-            use_extended_actions=args.use_extended_actions
+            use_extended_actions=True,
+            use_discrete_actions=True  # 이산 액션만
         )
         print("시뮬레이션 환경 사용 - 빠른 학습 가능")
         if args.render:
@@ -506,8 +504,8 @@ def main():
         
         env = RCCarEnv(
             max_steps=args.max_episode_steps,
-            use_extended_actions=args.use_extended_actions,
-            use_discrete_actions=args.use_discrete_actions
+            use_extended_actions=True,
+            use_discrete_actions=True  # 이산 액션만
         )
         print("=" * 60)
         print("⚠️  실제 하드웨어 환경 사용")
@@ -515,13 +513,10 @@ def main():
         print("⚠️  테스트/추론 전용입니다!")
         print("=" * 60)
     
-    # 에이전트 생성
-    # 이산 액션 모드인지 확인 (기본값: True)
-    use_discrete = args.use_discrete_actions
-    
+    # 에이전트 생성 (이산 액션만 사용)
     agent = PPOAgent(
         state_dim=256,
-        action_dim=2 if not use_discrete else 5,  # 이산 액션: 5개
+        action_dim=5,  # 이산 액션: 5개 (고정)
         latent_dim=args.latent_dim,
         hidden_dim=args.hidden_dim,
         n_cycles=args.n_cycles,
@@ -534,7 +529,7 @@ def main():
         entropy_coef=args.entropy_coef,
         value_coef=args.value_coef,
         device=device,
-        discrete_action=use_discrete,
+        discrete_action=True,  # 이산 액션만 사용
         num_discrete_actions=5,
         use_recurrent=args.use_recurrent,
         use_monte_carlo=args.use_mc

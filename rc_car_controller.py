@@ -39,19 +39,23 @@ ACTION_NAMES = {
 }
 
 
-class RCCarController:
-    def __init__(self, port='/dev/ttyUSB0', baudrate=9600):
+    
+    def __init__(self, port='/dev/ttyACM0', baudrate=9600, delay=0.0):
         """
         Initialize RC car controller
         
         Args:
             port: Serial port (Linux: /dev/ttyUSB0, /dev/ttyACM0, Windows: COM3)
             baudrate: Baud rate (default: 9600)
+            delay: Delay after each command in seconds (default: 0.0)
         """
+        self.command_delay = delay  # 명령어 간 지연 시간 저장
         try:
             self.serial = serial.Serial(port, baudrate, timeout=1)
             time.sleep(2)  # Wait for Arduino reset
             print(f"Connected to {port} at {baudrate} baud")
+            if delay > 0:
+                print(f"Command delay: {delay:.3f}s")
             
             # Read initial message from Arduino
             if self.serial.in_waiting:
@@ -64,22 +68,28 @@ class RCCarController:
             print("  Windows: COM3, COM4, etc.")
             sys.exit(1)
     
-    def send_command(self, command):
+    def send_command(self, command, custom_delay=None):
         """
         Send command to Arduino
         
         Args:
             command: Command string (e.g., "F255", "S")
+            custom_delay: Optional custom delay (overrides default delay)
         """
         try:
             self.serial.write(f"{command}\n".encode('utf-8'))
-            time.sleep(0.1)  # Wait for command processing
+            time.sleep(0.05)  # 최소 대기 시간 (Arduino 처리 시간)
             
             # Read response from Arduino
             while self.serial.in_waiting:
                 response = self.serial.readline().decode('utf-8').strip()
                 if response:
                     print(f"Arduino: {response}")
+            
+            # 사용자 지정 지연 시간 적용
+            delay_time = custom_delay if custom_delay is not None else self.command_delay
+            if delay_time > 0:
+                time.sleep(delay_time)
         except Exception as e:
             print(f"Error sending command: {e}")
     
@@ -206,8 +216,14 @@ def interactive_mode(controller):
         print("\nExiting...")
 
 
-def demo_mode(controller):
-    """Demo mode - automatic driving test (CarRacing style)"""
+def demo_mode(controller, step_delay=1.0):
+    """
+    Demo mode - automatic driving test (CarRacing style)
+    
+    Args:
+        controller: RCCarController instance
+        step_delay: Delay between demo steps in seconds (default: 1.0)
+    """
     print("\n=== RC Car Demo Mode (CarRacing Style) ===")
     
     print("1. Gas/Forward (2 seconds)")
@@ -245,24 +261,26 @@ def main():
     import argparse
     
     parser = argparse.ArgumentParser(description='RC Car Controller')
-    parser.add_argument('--port', default='/dev/ttyUSB0', 
+    parser.add_argument('--port', default='/dev/ttyACM0', 
                         help='Serial port (default: /dev/ttyUSB0)')
     parser.add_argument('--baudrate', type=int, default=9600,
                         help='Baud rate (default: 9600)')
     parser.add_argument('--mode', choices=['interactive', 'demo'], 
                         default='interactive',
                         help='Execution mode: interactive (keyboard control) or demo (automatic test)')
+    parser.add_argument('--delay', type=float, default=0.0,
+                        help='Delay after each command in seconds (default: 0.0, recommended: 0.1 for smooth control)')
     
     args = parser.parse_args()
     
     # Initialize RC Car controller
-    controller = RCCarController(port=args.port, baudrate=args.baudrate)
+    controller = RCCarController(port=args.port, baudrate=args.baudrate, delay=args.delay)
     
     try:
         if args.mode == 'interactive':
             interactive_mode(controller)
         elif args.mode == 'demo':
-            demo_mode(controller)
+            demo_mode(controller, step_delay=args.delay if args.delay > 0 else 1.0)
     finally:
         controller.close()
 
