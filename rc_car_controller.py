@@ -39,7 +39,7 @@ ACTION_NAMES = {
 }
 
 
-    
+class RCCarController:
     def __init__(self, port='/dev/ttyACM0', baudrate=9600, delay=0.0):
         """
         Initialize RC car controller
