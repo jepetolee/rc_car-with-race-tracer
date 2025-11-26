@@ -140,9 +140,9 @@ class AIAgentRunner:
     def _load_agent(self):
         """에이전트 생성 및 모델 로드"""
         # 에이전트 생성
-    agent = PPOAgent(
-        state_dim=256,
-        action_dim=5,  # 이산 액션만 (고정)
+        agent = PPOAgent(
+            state_dim=256,
+            action_dim=5,  # 이산 액션만 (고정)
             latent_dim=256,
             hidden_dim=256,
             n_cycles=4,
