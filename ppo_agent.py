@@ -842,16 +842,39 @@ class PPOAgent:
         print(f"Model saved to {path}")
     
     def load(self, path: str):
-        """모델 로드"""
-        checkpoint = torch.load(path, map_location=self.device)
-        self.actor_critic.load_state_dict(checkpoint['actor_critic'])
-        self.optimizer.load_state_dict(checkpoint['optimizer'])
-        if 'config' in checkpoint:
-            config = checkpoint['config']
-            self.use_recurrent = config.get('use_recurrent', True)
-            self.n_cycles = config.get('n_cycles', 4)
-            self.carry_latent = config.get('carry_latent', True)
-        print(f"Model loaded from {path}")
+        """모델 로드 (라즈베리 파이 호환)"""
+        try:
+            # 라즈베리 파이에서는 CPU로 강제 로드 (메모리 정렬 문제 방지)
+            map_location = 'cpu' if not torch.cuda.is_available() else self.device
+            
+            # 안전한 모델 로드 (weights_only 옵션은 PyTorch 1.13+)
+            try:
+                checkpoint = torch.load(path, map_location=map_location, weights_only=False)
+            except TypeError:
+                # 구버전 PyTorch 호환
+                checkpoint = torch.load(path, map_location=map_location)
+            
+            # 모델을 CPU로 로드한 후 필요시 디바이스로 이동
+            self.actor_critic.load_state_dict(checkpoint['actor_critic'])
+            self.actor_critic.to(self.device)
+            
+            if 'optimizer' in checkpoint:
+                self.optimizer.load_state_dict(checkpoint['optimizer'])
+            
+            if 'config' in checkpoint:
+                config = checkpoint['config']
+                self.use_recurrent = config.get('use_recurrent', True)
+                self.n_cycles = config.get('n_cycles', 4)
+                self.carry_latent = config.get('carry_latent', True)
+            
+            print(f"Model loaded from {path}")
+            print(f"Device: {self.device}")
+        
+        except Exception as e:
+            print(f"❌ 모델 로드 실패: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
 
 
 if __name__ == "__main__":

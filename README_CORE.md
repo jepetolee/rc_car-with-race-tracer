@@ -100,7 +100,7 @@ python train_with_teacher_forcing.py --demos human_demos.pkl --pretrain-epochs 1
 python train_human_feedback.py --model pretrained_model.pth --port /dev/ttyACM0 --episodes 10
 
 # 5단계: 추론
-python run_ai_agent.py --model ppo_model_feedback.pth --env-type real --port /dev/ttyACM0
+python run_ai_agent.py --model ppo_model.pth --env-type real --port /dev/ttyACM0
 ```
 
 ## 필수 파일

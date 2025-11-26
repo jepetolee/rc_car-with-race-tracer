@@ -66,13 +66,14 @@ class AIAgentRunner:
         self.use_discrete_actions = use_discrete_actions
         self.use_extended_actions = use_extended_actions
         
-        # 디바이스 설정
+        # 디바이스 설정 (라즈베리 파이에서는 항상 CPU)
         if device is None:
-            self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+            # 라즈베리 파이에서는 GPU가 없으므로 항상 CPU 사용
+            self.device = 'cpu'
         else:
             self.device = device
         
-        print(f"사용 디바이스: {self.device}")
+        print(f"🔧 디바이스: {self.device}")
         print(f"액션 지연 시간: {action_delay:.3f}초")
         print(f"환경 타입: {env_type}")
         
@@ -153,10 +154,15 @@ class AIAgentRunner:
             use_recurrent=True
         )
         
-        # 모델 로드
+        # 모델 로드 (안전한 방식)
         if os.path.exists(self.model_path):
-            agent.load(self.model_path)
-            print(f"✅ 모델 로드 완료: {self.model_path}")
+            try:
+                print(f"📥 모델 로드 중: {self.model_path}")
+                agent.load(self.model_path)
+                print(f"✅ 모델 로드 완료: {self.model_path}")
+            except Exception as e:
+                print(f"⚠️  모델 로드 실패: {e}")
+                print("랜덤 정책으로 실행합니다.")
         else:
             print(f"⚠️  모델 파일을 찾을 수 없습니다: {self.model_path}")
             print("랜덤 정책으로 실행합니다.")
