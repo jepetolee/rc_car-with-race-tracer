@@ -173,8 +173,8 @@ def interactive_mode(controller):
     print("=== CarRacing-v3 Compatible (No Reverse) ===")
     print("Commands:")
     print("  w: Forward (Gas)")
-    print("  a: Left + Gas")
-    print("  d: Right + Gas")
+    print("  a: Left + Gas (좌회전)")
+    print("  d: Right + Gas (우회전)")
     print("  s: Stop/Coast")
     print("  x: Brake")
     print("  0-4: Discrete actions")
@@ -191,9 +191,9 @@ def interactive_mode(controller):
             if cmd == 'w':
                 controller.forward(speed)
             elif cmd == 'a':
-                controller.left_gas(speed)
+                controller.left_gas(speed)   # 'a'는 좌회전 (Action 2)
             elif cmd == 'd':
-                controller.right_gas(speed)
+                controller.right_gas(speed)  # 'd'는 우회전 (Action 1)
             elif cmd == 's':
                 controller.stop()
             elif cmd == 'x':
