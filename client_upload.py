@@ -16,8 +16,11 @@ class ServerClient:
     def __init__(self, server_url='http://localhost:5000'):
         """
         Args:
-            server_url: 서버 URL (예: http://192.168.1.100:5000)
+            server_url: 서버 URL (예: http://192.168.1.100:5000 또는 192.168.1.100:5000)
         """
+        # http:// 프로토콜이 없으면 자동 추가
+        if not server_url.startswith('http://') and not server_url.startswith('https://'):
+            server_url = 'http://' + server_url
         self.server_url = server_url.rstrip('/')
     
     def health_check(self):
