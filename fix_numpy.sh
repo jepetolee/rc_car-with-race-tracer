@@ -10,11 +10,11 @@ python -c "import numpy; print(f'현재 버전: {numpy.__version__}')" 2>/dev/nu
 
 echo ""
 echo "NumPy 제거 중..."
-pip uninstall -y numpy
+uv pip uninstall -y numpy
 
 echo ""
 echo "NumPy 1.24.3 설치 중 (라즈베리 파이 호환 버전)..."
-pip install numpy==1.24.3 --no-cache-dir
+uv pip install numpy==1.24.3 --no-cache-dir
 
 echo ""
 echo "설치 확인..."

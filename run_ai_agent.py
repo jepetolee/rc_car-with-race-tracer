@@ -8,15 +8,29 @@ AI 에이전트 실행 스크립트
 """
 
 import os
-# NumPy 임포트 전에 환경 변수 설정 (Bus error 방지)
+# NumPy/PyTorch 임포트 전에 환경 변수 설정 (Bus error 방지)
 os.environ['OPENBLAS_NUM_THREADS'] = '1'
 os.environ['MKL_NUM_THREADS'] = '1'
 os.environ['NUMEXPR_NUM_THREADS'] = '1'
 os.environ['OMP_NUM_THREADS'] = '1'
+# PyTorch 스레드 제한
+os.environ['TORCH_NUM_THREADS'] = '1'
+os.environ['MKL_NUM_THREADS'] = '1'
 
 import argparse
 import numpy as np
-import torch
+
+# PyTorch 임포트 (안전하게)
+print("PyTorch 임포트 중...", flush=True)
+try:
+    import torch
+    print(f"✅ PyTorch {torch.__version__} 임포트 성공", flush=True)
+except Exception as e:
+    print(f"❌ PyTorch 임포트 실패: {e}", flush=True)
+    print("라즈베리 파이용 PyTorch를 설치하세요:", flush=True)
+    print("  pip install torch --index-url https://download.pytorch.org/whl/cpu", flush=True)
+    import sys
+    sys.exit(1)
 import time
 import sys
 import os
