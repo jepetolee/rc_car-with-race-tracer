@@ -60,12 +60,12 @@ class RCCarEnv(gym.Env):
         
         # 액션 공간
         if use_discrete_actions:
-            # 이산 액션: 5개 액션
-            # 0: 정지
-            # 1: 전진 직진
-            # 2: 전진 좌회전
-            # 3: 전진 우회전
-            # 4: 후진
+            # 이산 액션: 5개 액션 (CarRacing-v3 호환)
+            # 0: 정지 (do nothing / coast)
+            # 1: 우회전 + 가스 (steer right + gas)
+            # 2: 좌회전 + 가스 (steer left + gas)
+            # 3: 직진 가스 (gas only)
+            # 4: 급정지 (brake)
             self.action_space = spaces.Discrete(5)
         elif use_extended_actions:
             # 확장된 액션: [전진/후진 속도, 좌회전/우회전 각도]
@@ -106,37 +106,40 @@ class RCCarEnv(gym.Env):
     
     def _discrete_to_continuous(self, discrete_action):
         """
-        이산 액션을 연속 액션으로 변환
+        이산 액션을 연속 액션으로 변환 (CarRacing-v3 호환)
         
         Args:
             discrete_action: 이산 액션 (0-4)
-                0: 정지
-                1: 전진 직진
-                2: 전진 좌회전
-                3: 전진 우회전
-                4: 후진
+                0: 정지 / 코스팅 (do nothing) → RC Car: 정지
+                1: 우회전 + 가스 (steer right + gas)
+                2: 좌회전 + 가스 (steer left + gas)
+                3: 직진 가스 (gas only)
+                4: 브레이크 (brake) → RC Car: 정지 (0과 동일)
         
         Returns:
-            continuous_action: [전진/후진, 좌회전/우회전] 형태의 연속 액션
-        """
-        speed = 0.7  # 기본 속도 (0.0 ~ 1.0)
-        turn_factor = 0.5  # 회전 강도
+            continuous_action: [전진속도, 좌우회전] 형태의 연속 액션
+                전진속도: 0.0 ~ 1.0 (후진 없음)
+                좌우회전: -1.0(좌) ~ 1.0(우)
         
-        if discrete_action == 0:
-            # 정지
+        Note:
+            CarRacing에서는 0(coast)과 4(brake)가 다르지만,
+            RC Car에서는 둘 다 정지로 동일하게 처리됨
+        """
+        speed = 0.8  # 기본 전진 속도
+        turn_factor = 0.6  # 회전 강도
+        
+        if discrete_action == 0 or discrete_action == 4:
+            # 정지 (coast와 brake 모두 RC Car에서는 동일)
             return np.array([0.0, 0.0], dtype=np.float32)
         elif discrete_action == 1:
-            # 전진 직진
-            return np.array([speed, 0.0], dtype=np.float32)
+            # 우회전 + 가스
+            return np.array([speed, turn_factor], dtype=np.float32)
         elif discrete_action == 2:
-            # 전진 좌회전
+            # 좌회전 + 가스
             return np.array([speed, -turn_factor], dtype=np.float32)
         elif discrete_action == 3:
-            # 전진 우회전
-            return np.array([speed, turn_factor], dtype=np.float32)
-        elif discrete_action == 4:
-            # 후진
-            return np.array([-speed, 0.0], dtype=np.float32)
+            # 직진 가스
+            return np.array([speed, 0.0], dtype=np.float32)
         else:
             # 기본값: 정지
             return np.array([0.0, 0.0], dtype=np.float32)
@@ -169,23 +172,21 @@ class RCCarEnv(gym.Env):
             original_action = action
         
         if self.use_extended_actions or self.use_discrete_actions:
-            # 확장된 액션 해석
-            forward_backward = action[0]  # -1.0(후진) ~ 1.0(전진)
+            # 새로운 액션 체계 (후진 없음, CarRacing 호환)
+            forward_speed = action[0]  # 0.0 ~ 1.0 (전진만)
             left_right = action[1]  # -1.0(좌회전) ~ 1.0(우회전)
             
-            # 전진/후진 속도 계산
-            base_speed = abs(forward_backward) * 255
+            # 전진 속도 계산 (후진 없음)
+            base_speed = max(0, forward_speed) * 255
             base_speed = int(np.clip(base_speed, 0, 255))
             
             # 좌회전/우회전에 따른 좌우 바퀴 속도 차이
+            # 우회전(+): 왼쪽 빠르게, 오른쪽 느리게
+            # 좌회전(-): 왼쪽 느리게, 오른쪽 빠르게
             turn_factor = left_right * 0.5  # 최대 50% 차이
             
-            if forward_backward >= 0:  # 전진
-                left_speed = int(base_speed * (1.0 - turn_factor))
-                right_speed = int(base_speed * (1.0 + turn_factor))
-            else:  # 후진
-                left_speed = int(-base_speed * (1.0 - turn_factor))
-                right_speed = int(-base_speed * (1.0 + turn_factor))
+            left_speed = int(base_speed * (1.0 + turn_factor))
+            right_speed = int(base_speed * (1.0 - turn_factor))
             
             # 속도 범위 제한 (0-255)
             left_speed = int(np.clip(left_speed, 0, 255))

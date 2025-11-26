@@ -92,10 +92,14 @@ class CarRacingEnvWrapper(gym.Env):
             dtype=np.uint8
         )
         
-        # 액션 공간
+        # 액션 공간 (CarRacing-v3 호환)
         if use_discrete_actions:
-            # 이산 액션: CarRacing의 5개 액션
-            # 0: do nothing, 1: steer right, 2: steer left, 3: gas, 4: brake
+            # 이산 액션: 5개 액션 (RC Car 통합)
+            # 0: do nothing / 정지 (coast)
+            # 1: steer right / 우회전 + 가스
+            # 2: steer left / 좌회전 + 가스
+            # 3: gas / 직진 가스
+            # 4: brake / 급정지
             self.action_space = spaces.Discrete(5)
         elif use_extended_actions:
             # 확장된 액션: [전진/후진, 좌회전/우회전]

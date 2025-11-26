@@ -24,14 +24,16 @@ class RCCarSimEnv(gym.Env):
                  track_height=600,
                  render_mode=None,
                  max_steps=2000,
-                 use_extended_actions=True):
+                 use_extended_actions=True,
+                 use_discrete_actions=True):
         """
         Args:
             track_width: 트랙 너비
             track_height: 트랙 높이
             render_mode: 렌더링 모드 ('human' or 'rgb_array')
             max_steps: 최대 스텝 수
-            use_extended_actions: 확장된 액션 공간 사용 여부
+            use_extended_actions: 확장된 액션 공간 사용 여부 (연속 액션)
+            use_discrete_actions: 이산 액션 공간 사용 여부
         """
         super(RCCarSimEnv, self).__init__()
         
@@ -40,6 +42,7 @@ class RCCarSimEnv(gym.Env):
         self.render_mode = render_mode
         self.max_steps = max_steps
         self.use_extended_actions = use_extended_actions
+        self.use_discrete_actions = use_discrete_actions
         
         # 상태 공간: 16x16 grayscale 이미지 (256 차원)
         self.observation_space = spaces.Box(
@@ -48,13 +51,16 @@ class RCCarSimEnv(gym.Env):
             dtype=np.uint8
         )
         
-        # 액션 공간
-        if use_extended_actions:
-            # 확장된 액션: [전진/후진 속도, 좌회전/우회전 각도]
-            # 전진/후진: -1.0(후진) ~ 1.0(전진)
-            # 좌회전/우회전: -1.0(좌회전) ~ 1.0(우회전)
+        # 액션 공간 (CarRacing-v3 호환)
+        if use_discrete_actions:
+            # 이산 액션: 5개 액션
+            # 0: 정지/코스팅, 1: 우회전+가스, 2: 좌회전+가스, 3: 직진, 4: 브레이크
+            self.action_space = spaces.Discrete(5)
+        elif use_extended_actions:
+            # 확장된 액션: [전진 속도, 좌회전/우회전 각도] (후진 없음)
             self.action_space = spaces.Box(
-                low=-1.0, high=1.0,
+                low=np.array([0.0, -1.0]),
+                high=np.array([1.0, 1.0]),
                 shape=(2,),
                 dtype=np.float32
             )
@@ -95,6 +101,39 @@ class RCCarSimEnv(gym.Env):
         
         # 트랙 생성
         self._generate_track()
+    
+    def _discrete_to_continuous(self, discrete_action):
+        """
+        이산 액션을 연속 액션으로 변환 (CarRacing-v3 호환)
+        
+        Args:
+            discrete_action: 이산 액션 (0-4)
+                0: 정지/코스팅 → 정지
+                1: 우회전 + 가스
+                2: 좌회전 + 가스
+                3: 직진 가스
+                4: 브레이크 → 정지 (0과 동일)
+        
+        Returns:
+            continuous_action: [전진속도, 좌우회전] 형태의 연속 액션
+        
+        Note:
+            RC Car에서는 action 0(coast)과 4(brake) 모두 정지로 처리
+        """
+        speed = 0.8
+        turn_factor = 0.6
+        
+        if discrete_action == 0 or discrete_action == 4:
+            # 정지 (coast와 brake 모두 동일)
+            return np.array([0.0, 0.0], dtype=np.float32)
+        elif discrete_action == 1:
+            return np.array([speed, turn_factor], dtype=np.float32)
+        elif discrete_action == 2:
+            return np.array([speed, -turn_factor], dtype=np.float32)
+        elif discrete_action == 3:
+            return np.array([speed, 0.0], dtype=np.float32)
+        else:
+            return np.array([0.0, 0.0], dtype=np.float32)
         
     def _generate_track(self):
         """가상 트랙 생성 (타원형 트랙)"""
@@ -186,20 +225,29 @@ class RCCarSimEnv(gym.Env):
         환경 스텝 실행
         
         Args:
-            action: 액션 벡터
-                - use_extended_actions=True: [전진/후진, 좌회전/우회전]
+            action: 액션
+                - use_discrete_actions=True: 정수 (0-4)
+                - use_extended_actions=True: [전진속도, 좌회전/우회전]
                 - use_extended_actions=False: [left_speed, right_speed]
         
         Returns:
             observation, reward, done, info
         """
-        if self.use_extended_actions:
-            # 확장된 액션 해석
-            forward_backward = action[0]  # -1.0(후진) ~ 1.0(전진)
+        # 이산 액션을 연속 액션으로 변환
+        if self.use_discrete_actions:
+            if isinstance(action, (list, np.ndarray)):
+                discrete_action = int(action[0]) if len(np.atleast_1d(action)) > 0 else int(action)
+            else:
+                discrete_action = int(action)
+            action = self._discrete_to_continuous(discrete_action)
+        
+        if self.use_extended_actions or self.use_discrete_actions:
+            # 확장된 액션 해석 (후진 없음)
+            forward_speed = max(0, action[0])  # 0.0 ~ 1.0 (전진만)
             left_right = action[1]  # -1.0(좌회전) ~ 1.0(우회전)
             
             # 속도 업데이트
-            target_speed = forward_backward * self.max_speed
+            target_speed = forward_speed * self.max_speed
             self.car_speed = self.car_speed * 0.8 + target_speed * 0.2
             
             # 각속도 업데이트
@@ -269,14 +317,13 @@ class RCCarSimEnv(gym.Env):
         return next_state, reward, done, info
     
     def _compute_reward(self, img, action):
-        """리워드 계산"""
+        """리워드 계산 (CarRacing 스타일)"""
         reward = 0.0
         
         # 1. 속도 리워드 (전진 시)
-        if self.use_extended_actions:
-            forward_speed = action[0]
-            if forward_speed > 0:
-                reward += forward_speed * 0.5
+        if self.use_extended_actions or self.use_discrete_actions:
+            forward_speed = max(0, action[0])
+            reward += forward_speed * 0.5
         else:
             speed = np.mean([abs(action[0]), abs(action[1])])
             reward += speed * 0.5
@@ -290,7 +337,7 @@ class RCCarSimEnv(gym.Env):
         reward += center_brightness * 1.0
         
         # 4. 안정성 리워드 (직진 유지)
-        if self.use_extended_actions:
+        if self.use_extended_actions or self.use_discrete_actions:
             turning = abs(action[1])
             reward += (1.0 - turning) * 0.3
         
