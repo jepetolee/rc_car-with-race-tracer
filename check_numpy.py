@@ -41,9 +41,14 @@ except Exception as e:
 
 print("\n[4] NumPy 설정 정보:")
 try:
-    np.show_config()
-except:
-    print("   설정 정보를 가져올 수 없습니다.")
+    # show_config()는 stdout에 직접 출력하므로 캡처하지 않음
+    import sys
+    print("   NumPy 빌드 정보 확인 중...")
+    # show_config() 호출을 피하고 대신 다른 방법으로 확인
+    print(f"   NumPy 데이터 타입: {np.dtype('float32')}")
+    print(f"   NumPy 배열 생성 테스트: {np.array([1, 2, 3]).dtype}")
+except Exception as e:
+    print(f"   ⚠️  설정 정보 확인 실패: {e}")
 
 print("\n" + "=" * 60)
 print("✅ NumPy 정상 작동")

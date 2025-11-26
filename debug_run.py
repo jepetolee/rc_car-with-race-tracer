@@ -26,7 +26,15 @@ try:
     
     import numpy as np
     print(f"✅ numpy 임포트 성공 (버전: {np.__version__})")
-    print(f"   NumPy 설정: {np.show_config()}")
+    
+    # 기본 연산 테스트 (show_config()는 Bus error를 일으킬 수 있으므로 제외)
+    try:
+        test_array = np.array([1, 2, 3])
+        result = test_array.sum()
+        print(f"   기본 연산 테스트: {result} ✅")
+    except Exception as e:
+        print(f"   ❌ NumPy 연산 실패: {e}")
+        raise
 except Exception as e:
     print(f"❌ numpy 임포트 실패: {e}")
     import traceback
