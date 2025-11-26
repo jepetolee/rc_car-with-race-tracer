@@ -27,13 +27,18 @@ try:
     import numpy as np
     print(f"✅ numpy 임포트 성공 (버전: {np.__version__})")
     
-    # 기본 연산 테스트 (show_config()는 Bus error를 일으킬 수 있으므로 제외)
+    # 기본 연산 테스트 (간단하게)
+    print("   기본 연산 테스트 중...")
     try:
-        test_array = np.array([1, 2, 3])
-        result = test_array.sum()
-        print(f"   기본 연산 테스트: {result} ✅")
+        # 매우 간단한 연산만 테스트
+        test_array = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+        print(f"   배열 생성 성공: shape={test_array.shape}")
+        result = float(test_array[0])  # 인덱싱만 (sum()은 복잡할 수 있음)
+        print(f"   인덱싱 테스트: {result} ✅")
     except Exception as e:
         print(f"   ❌ NumPy 연산 실패: {e}")
+        import traceback
+        traceback.print_exc()
         raise
 except Exception as e:
     print(f"❌ numpy 임포트 실패: {e}")
@@ -41,11 +46,17 @@ except Exception as e:
     traceback.print_exc()
     sys.exit(1)
 
+print("\n[1-2] PyTorch 임포트...")
 try:
+    # PyTorch도 환경 변수 설정
+    os.environ['TORCH_NUM_THREADS'] = '1'
     import torch
     print(f"✅ torch 임포트 성공 (버전: {torch.__version__})")
+    print(f"   디바이스: {'CUDA' if torch.cuda.is_available() else 'CPU'}")
 except Exception as e:
     print(f"❌ torch 임포트 실패: {e}")
+    import traceback
+    traceback.print_exc()
     sys.exit(1)
 
 # 2단계: 환경 임포트
