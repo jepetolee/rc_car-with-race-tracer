@@ -15,6 +15,7 @@ import torch
 # 학습 관련 임포트
 from train_with_teacher_forcing import TeacherForcingTrainer
 from train_ppo import train_ppo
+from train_imitation_rl import ImitationRLTrainer
 from ppo_agent import PPOAgent
 
 app = Flask(__name__)
@@ -136,6 +137,67 @@ def train_supervised():
         return jsonify({
             'status': 'success',
             'model_path': model_path,
+            'epochs': epochs
+        })
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/train/imitation_rl', methods=['POST'])
+def train_imitation_rl_api():
+    """
+    Imitation Learning via Reinforcement Learning 학습 시작
+    
+    요청:
+    - file_path: 업로드된 데모 데이터 파일 경로
+    - model_path: 사전 학습된 모델 경로 (선택)
+    - epochs: 학습 에폭 수 (기본: 100)
+    - batch_size: 배치 크기 (기본: 64)
+    - learning_rate: 학습률 (기본: 3e-4)
+    
+    응답:
+    - status: success
+    - model_path: 학습된 모델 경로
+    - final_match_rate: 최종 일치율
+    """
+    try:
+        data = request.json
+        file_path = data.get('file_path')
+        model_path = data.get('model_path')
+        epochs = data.get('epochs', 100)
+        batch_size = data.get('batch_size', 64)
+        learning_rate = data.get('learning_rate', 3e-4)
+        
+        if not file_path or not os.path.exists(file_path):
+            return jsonify({'error': 'Invalid file_path'}), 400
+        
+        # Trainer 생성 및 학습
+        trainer = ImitationRLTrainer(
+            demos_path=file_path,
+            model_path=model_path,
+            device='cpu',  # 서버에서도 CPU 사용 (GPU가 있다면 'cuda'로 변경)
+            learning_rate=learning_rate,
+            batch_size=batch_size
+        )
+        
+        model_filename = f"imitation_rl_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pth"
+        model_path = os.path.join(MODEL_FOLDER, model_filename)
+        
+        # 학습 실행
+        trainer.train(
+            epochs=epochs,
+            save_path=model_path,
+            verbose=False  # 서버에서는 상세 출력 비활성화
+        )
+        
+        # 최종 평가
+        final_match_rate = trainer.evaluate()
+        
+        return jsonify({
+            'status': 'success',
+            'model_path': model_path,
+            'final_match_rate': float(final_match_rate),
             'epochs': epochs
         })
     

@@ -87,6 +87,41 @@ class ServerClient:
             print(f"❌ 학습 요청 실패: {e}")
             return None
     
+    def train_imitation_rl(self, file_path, model_path=None, epochs=100, batch_size=64, learning_rate=3e-4):
+        """
+        Imitation Learning via Reinforcement Learning 학습 요청
+        
+        Args:
+            file_path: 서버에 업로드된 데모 데이터 파일 경로
+            model_path: 사전 학습된 모델 경로 (선택)
+            epochs: 학습 에폭 수
+            batch_size: 배치 크기
+            learning_rate: 학습률
+        
+        Returns:
+            학습 결과 (dict)
+        """
+        try:
+            data = {
+                'file_path': file_path,
+                'epochs': epochs,
+                'batch_size': batch_size,
+                'learning_rate': learning_rate
+            }
+            if model_path:
+                data['model_path'] = model_path
+            
+            response = requests.post(
+                f"{self.server_url}/api/train/imitation_rl",
+                json=data,
+                timeout=3600  # 1시간 타임아웃
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            print(f"❌ 학습 요청 실패: {e}")
+            return None
+    
     def download_model(self, save_path='latest_model.pth'):
         """
         최신 모델 다운로드
@@ -164,8 +199,16 @@ def main():
                         help='업로드할 데이터 파일 경로')
     parser.add_argument('--train', type=str,
                         help='학습할 데이터 파일 경로 (서버에 업로드된 파일)')
+    parser.add_argument('--train-imitation', type=str,
+                        help='Imitation RL 학습할 데이터 파일 경로')
+    parser.add_argument('--pretrain-model', type=str,
+                        help='사전 학습된 모델 경로 (Imitation RL용)')
     parser.add_argument('--epochs', type=int, default=100,
                         help='학습 에폭 수 (기본: 100)')
+    parser.add_argument('--batch-size', type=int, default=64,
+                        help='배치 크기 (기본: 64)')
+    parser.add_argument('--learning-rate', type=float, default=3e-4,
+                        help='학습률 (기본: 3e-4)')
     parser.add_argument('--download', type=str,
                         help='모델 다운로드 경로 (예: latest_model.pth)')
     parser.add_argument('--list', action='store_true',
@@ -195,13 +238,32 @@ def main():
             print(f"   스텝: {result.get('total_steps')}")
             print(f"   파일 경로: {result.get('file_path')}")
     
-    # 학습 요청
+    # Supervised Learning 학습 요청
     if args.train:
-        print(f"🎓 학습 시작: {args.train}")
-        result = client.train_supervised(args.train, epochs=args.epochs)
+        print(f"🎓 Supervised Learning 시작: {args.train}")
+        result = client.train_supervised(
+            args.train,
+            epochs=args.epochs,
+            batch_size=args.batch_size
+        )
         if result:
             print(f"✅ 학습 완료:")
             print(f"   모델 경로: {result.get('model_path')}")
+    
+    # Imitation RL 학습 요청
+    if args.train_imitation:
+        print(f"🎓 Imitation RL 학습 시작: {args.train_imitation}")
+        result = client.train_imitation_rl(
+            args.train_imitation,
+            model_path=args.pretrain_model,
+            epochs=args.epochs,
+            batch_size=args.batch_size,
+            learning_rate=args.learning_rate
+        )
+        if result:
+            print(f"✅ 학습 완료:")
+            print(f"   모델 경로: {result.get('model_path')}")
+            print(f"   최종 일치율: {result.get('final_match_rate', 0):.2%}")
     
     # 모델 다운로드
     if args.download:
