@@ -422,17 +422,29 @@ def main():
     
     args = parser.parse_args()
     
-    # AI 에이전트 실행기 생성
-    runner = AIAgentRunner(
-        model_path=args.model,
-        env_type=args.env_type,
-        port=args.port,
-        action_delay=args.delay,
-        max_steps=args.max_steps,
-        use_discrete_actions=args.use_discrete_actions,
-        use_extended_actions=args.use_extended_actions,
-        device=args.device
-    )
+    print("\n" + "=" * 60)
+    print("AIAgentRunner 생성 시작")
+    print("=" * 60)
+    
+    # AI 에이전트 실행기 생성 (단계별)
+    try:
+        print("\n[단계 1] AIAgentRunner 인스턴스 생성 중...")
+        runner = AIAgentRunner(
+            model_path=args.model,
+            env_type=args.env_type,
+            port=args.port,
+            action_delay=args.delay,
+            max_steps=args.max_steps,
+            use_discrete_actions=args.use_discrete_actions,
+            use_extended_actions=args.use_extended_actions,
+            device=args.device
+        )
+        print("✅ AIAgentRunner 생성 완료")
+    except Exception as e:
+        print(f"\n❌ AIAgentRunner 생성 실패: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
     
     try:
         # 에피소드 실행
