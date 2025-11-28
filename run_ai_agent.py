@@ -181,24 +181,58 @@ class AIAgentRunner:
     
     def _load_agent(self):
         """에이전트 생성 및 모델 로드"""
-        # 에이전트 생성
+        # 모델 파일에서 설정 정보 먼저 읽기
+        use_recurrent = True  # 기본값
+        latent_dim = 256
+        hidden_dim = 256
+        n_cycles = 4
+        carry_latent = True
+        
+        if os.path.exists(self.model_path):
+            try:
+                # 모델 파일에서 config 정보만 먼저 읽기
+                map_location = 'cpu' if not torch.cuda.is_available() else self.device
+                try:
+                    checkpoint = torch.load(self.model_path, map_location=map_location, weights_only=False)
+                except TypeError:
+                    checkpoint = torch.load(self.model_path, map_location=map_location)
+                
+                if 'config' in checkpoint:
+                    config = checkpoint['config']
+                    use_recurrent = config.get('use_recurrent', True)
+                    latent_dim = config.get('latent_dim', 256)
+                    n_cycles = config.get('n_cycles', 4)
+                    carry_latent = config.get('carry_latent', True)
+                    print(f"📋 모델 설정 정보 읽기 완료:")
+                    print(f"   - use_recurrent: {use_recurrent}")
+                    print(f"   - latent_dim: {latent_dim}")
+                    print(f"   - n_cycles: {n_cycles}")
+                    print(f"   - carry_latent: {carry_latent}")
+                else:
+                    print(f"⚠️  모델 파일에 config 정보가 없습니다. 기본값을 사용합니다.")
+                    print(f"   - use_recurrent: {use_recurrent} (기본값)")
+            except Exception as e:
+                print(f"⚠️  모델 설정 정보 읽기 실패: {e}")
+                print(f"   기본값을 사용합니다: use_recurrent={use_recurrent}")
+        
+        # 모델 설정에 맞게 에이전트 생성
         agent = PPOAgent(
             state_dim=784,  # 28x28 이미지 = 784 차원 (환경 출력과 일치)
             action_dim=5,  # 이산 액션만 (고정)
-            latent_dim=256,
-            hidden_dim=256,
-            n_cycles=4,
-            carry_latent=True,
+            latent_dim=latent_dim,
+            hidden_dim=hidden_dim,
+            n_cycles=n_cycles,
+            carry_latent=carry_latent,
             device=self.device,
             discrete_action=True,  # 이산 액션만
             num_discrete_actions=5,
-            use_recurrent=True
+            use_recurrent=use_recurrent
         )
         
         # 모델 로드 (안전한 방식)
         if os.path.exists(self.model_path):
             try:
-                print(f"📥 모델 로드 중: {self.model_path}")
+                print(f"📥 모델 가중치 로드 중: {self.model_path}")
                 agent.load(self.model_path)
                 print(f"✅ 모델 로드 완료: {self.model_path}")
             except Exception as e:
