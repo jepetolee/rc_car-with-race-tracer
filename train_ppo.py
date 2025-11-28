@@ -367,12 +367,17 @@ def main():
     # 학습 파라미터
     parser.add_argument('--total-steps', type=int, default=100000,
                         help='총 학습 스텝 수 (기본: 100000)')
+    parser.add_argument('--lr-schedule', type=str, default='cosine',
+                        choices=['cosine', 'linear', 'none'],
+                        help='학습률 스케줄링 방식: cosine (코사인 감소), linear (선형 감소), none (없음)')
     parser.add_argument('--update-frequency', type=int, default=2048,
                         help='업데이트 주기 (기본: 2048)')
     parser.add_argument('--update-epochs', type=int, default=10,
                         help='업데이트 에폭 수 (기본: 10)')
     
     # 네트워크 파라미터
+    parser.add_argument('--state-dim', type=int, default=784,
+                        help='상태 차원 (기본: 784 = 28x28)')
     parser.add_argument('--hidden-dim', type=int, default=256,
                         help='히든 레이어 차원 (기본: 256)')
     parser.add_argument('--lr-actor', type=float, default=3e-4,
@@ -455,7 +460,8 @@ def main():
     
     print(f"사용 디바이스: {device}")
     print(f"환경 타입: {args.env_type}")
-    print(f"확장된 액션 공간: {args.use_extended_actions}")
+    print(f"상태 차원: {args.state_dim} ({int(args.state_dim**0.5)}x{int(args.state_dim**0.5)})")
+    print(f"액션 공간: 이산 (5개 액션)")
     
     # 환경 생성 (이산 액션만 사용)
     if args.env_type == 'carracing':
@@ -515,7 +521,7 @@ def main():
     
     # 에이전트 생성 (이산 액션만 사용)
     agent = PPOAgent(
-        state_dim=256,
+        state_dim=args.state_dim,  # 28x28 = 784 (기본값)
         action_dim=5,  # 이산 액션: 5개 (고정)
         latent_dim=args.latent_dim,
         hidden_dim=args.hidden_dim,
@@ -531,6 +537,8 @@ def main():
         device=device,
         discrete_action=True,  # 이산 액션만 사용
         num_discrete_actions=5,
+        total_steps=args.total_steps,
+        lr_schedule=args.lr_schedule,
         use_recurrent=args.use_recurrent,
         use_monte_carlo=args.use_mc
     )

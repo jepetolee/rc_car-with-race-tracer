@@ -33,12 +33,13 @@ class ServerClient:
             print(f"❌ 서버 연결 실패: {e}")
             return None
     
-    def upload_data(self, file_path):
+    def upload_data(self, file_path, chunk_size_mb=10):
         """
-        데이터 파일 업로드
+        데이터 파일 업로드 (대용량 파일 지원)
         
         Args:
             file_path: 업로드할 pickle 파일 경로
+            chunk_size_mb: 청크 크기 (MB, 기본: 10MB)
         
         Returns:
             업로드 결과 (dict)
@@ -47,16 +48,37 @@ class ServerClient:
             print(f"❌ 파일을 찾을 수 없습니다: {file_path}")
             return None
         
+        # 파일 크기 확인
+        file_size = os.path.getsize(file_path)
+        file_size_mb = file_size / (1024 * 1024)
+        
+        print(f"📊 파일 크기: {file_size_mb:.2f} MB")
+        
+        # 파일이 크면 경고
+        if file_size_mb > 50:
+            print(f"⚠️  파일이 큽니다 ({file_size_mb:.2f} MB). 업로드에 시간이 걸릴 수 있습니다.")
+        
         try:
             with open(file_path, 'rb') as f:
                 files = {'file': (os.path.basename(file_path), f, 'application/octet-stream')}
+                
+                # 타임아웃 계산 (파일 크기에 따라)
+                timeout = max(60, int(file_size_mb * 2))  # 최소 60초, MB당 2초
+                print(f"⏱️  타임아웃: {timeout}초")
+                
                 response = requests.post(
                     f"{self.server_url}/api/upload_data",
                     files=files,
-                    timeout=60
+                    timeout=timeout
                 )
                 response.raise_for_status()
                 return response.json()
+        except requests.exceptions.Timeout:
+            print(f"❌ 업로드 타임아웃 (파일이 너무 큽니다)")
+            print(f"💡 해결 방법:")
+            print(f"   1. 파일을 압축하거나")
+            print(f"   2. 서버의 타임아웃 설정을 늘리세요")
+            return None
         except Exception as e:
             print(f"❌ 업로드 실패: {e}")
             return None

@@ -58,11 +58,27 @@ def upload_data():
         if file.filename == '':
             return jsonify({'error': 'No file selected'}), 400
         
+        # 파일 크기 확인
+        file.seek(0, os.SEEK_END)
+        file_size = file.tell()
+        file_size_mb = file_size / (1024 * 1024)
+        file.seek(0)  # 다시 처음으로
+        
+        print(f"📤 파일 업로드 시작: {file.filename} ({file_size_mb:.2f} MB)")
+        
         # 파일 저장
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         filename = f"demos_{timestamp}.pkl"
         filepath = os.path.join(UPLOAD_FOLDER, filename)
-        file.save(filepath)
+        
+        # 청크 단위로 저장 (대용량 파일 지원)
+        chunk_size = 1024 * 1024  # 1MB 청크
+        with open(filepath, 'wb') as f:
+            while True:
+                chunk = file.read(chunk_size)
+                if not chunk:
+                    break
+                f.write(chunk)
         
         # 데이터 검증
         try:
@@ -79,6 +95,147 @@ def upload_data():
             'filename': filename,
             'num_episodes': num_episodes,
             'total_steps': total_steps
+        })
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# 패치 업로드를 위한 임시 저장소
+PATCH_STORAGE = {}  # {session_id: {'patches': [...], 'metadata': {...}}}
+
+
+@app.route('/api/upload_patch', methods=['POST'])
+def upload_patch():
+    """
+    패치 단위로 데이터 업로드 (16x16 이미지 패치)
+    
+    요청:
+    - session_id: 세션 ID (같은 업로드 세션)
+    - patch_index: 패치 인덱스
+    - total_patches: 총 패치 수
+    - states: 이미지 패치 배열 (16x16 이미지들의 리스트)
+    - actions: 액션 배열
+    - metadata: 메타데이터 (첫 패치에만)
+    
+    응답:
+    - status: success
+    - patch_index: 받은 패치 인덱스
+    """
+    try:
+        data = request.json
+        session_id = data.get('session_id')
+        patch_index = data.get('patch_index')
+        total_patches = data.get('total_patches')
+        states = data.get('states')
+        actions = data.get('actions')
+        metadata = data.get('metadata')
+        
+        if not session_id:
+            return jsonify({'error': 'session_id required'}), 400
+        
+        # 세션 초기화
+        if session_id not in PATCH_STORAGE:
+            PATCH_STORAGE[session_id] = {
+                'patches': [],
+                'metadata': None,
+                'total_patches': total_patches
+            }
+        
+        # 패치 저장
+        PATCH_STORAGE[session_id]['patches'].append({
+            'index': patch_index,
+            'states': states,
+            'actions': actions
+        })
+        
+        # 메타데이터 저장 (첫 패치)
+        if metadata and PATCH_STORAGE[session_id]['metadata'] is None:
+            PATCH_STORAGE[session_id]['metadata'] = metadata
+        
+        return jsonify({
+            'status': 'success',
+            'patch_index': patch_index,
+            'received_patches': len(PATCH_STORAGE[session_id]['patches']),
+            'total_patches': total_patches
+        })
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/merge_patches', methods=['POST'])
+def merge_patches():
+    """
+    업로드된 패치들을 하나의 파일로 병합
+    
+    요청:
+    - session_id: 세션 ID
+    
+    응답:
+    - status: success
+    - file_path: 저장된 파일 경로
+    - total_samples: 총 샘플 수
+    """
+    try:
+        data = request.json
+        session_id = data.get('session_id')
+        
+        if not session_id or session_id not in PATCH_STORAGE:
+            return jsonify({'error': 'Invalid session_id'}), 400
+        
+        session_data = PATCH_STORAGE[session_id]
+        patches = session_data['patches']
+        metadata = session_data['metadata']
+        
+        if len(patches) == 0:
+            return jsonify({'error': 'No patches found'}), 400
+        
+        # 패치들을 인덱스 순으로 정렬
+        patches.sort(key=lambda x: x['index'])
+        
+        # 모든 패치 병합
+        all_states = []
+        all_actions = []
+        
+        for patch in patches:
+            all_states.extend(patch['states'])
+            all_actions.extend(patch['actions'])
+        
+        # 에피소드 형태로 변환 (단일 에피소드로)
+        demonstrations = [{
+            'states': all_states,
+            'actions': all_actions,
+            'rewards': [0.0] * len(all_states),  # 리워드는 0으로 설정
+            'dones': [False] * (len(all_states) - 1) + [True],
+            'timestamps': []
+        }]
+        
+        # 메타데이터 업데이트
+        if metadata:
+            metadata['num_episodes'] = 1
+            metadata['total_steps'] = len(all_states)
+        
+        # 파일 저장
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"demos_patched_{timestamp}.pkl"
+        filepath = os.path.join(UPLOAD_FOLDER, filename)
+        
+        with open(filepath, 'wb') as f:
+            pickle.dump({
+                'metadata': metadata or {},
+                'demonstrations': demonstrations
+            }, f)
+        
+        # 세션 데이터 삭제
+        del PATCH_STORAGE[session_id]
+        
+        return jsonify({
+            'status': 'success',
+            'file_path': filepath,
+            'filename': filename,
+            'total_samples': len(all_states),
+            'num_patches': len(patches)
         })
     
     except Exception as e:

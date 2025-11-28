@@ -8,6 +8,7 @@ PyTorch를 사용한 직접 구현
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.optim.lr_scheduler as lr_scheduler
 import torch.nn.functional as F
 import numpy as np
 from collections import deque
@@ -482,7 +483,9 @@ class PPOAgent:
         discrete_action: bool = False,
         num_discrete_actions: int = 5,
         use_recurrent: bool = True,
-        use_monte_carlo: bool = False
+        use_monte_carlo: bool = False,
+        total_steps: int = 1000000,
+        lr_schedule: str = 'cosine'  # 'cosine', 'linear', 'none'
     ):
         """
         Args:
@@ -518,6 +521,10 @@ class PPOAgent:
         self.use_recurrent = use_recurrent
         self.latent_dim = latent_dim
         self.use_monte_carlo = use_monte_carlo
+        self.total_steps = total_steps
+        self.lr_schedule = lr_schedule
+        self.initial_lr_actor = lr_actor
+        self.initial_lr_critic = lr_critic
         
         # Actor-Critic 네트워크 (TRM 스타일 또는 기존)
         if use_recurrent:
@@ -544,6 +551,26 @@ class PPOAgent:
             self.actor_critic.parameters(),
             lr=lr_actor
         )
+        
+        # 학습률 스케줄러
+        if lr_schedule == 'cosine':
+            # 코사인 감소: 초기 lr → 최종 lr (0.1 * initial_lr)
+            self.scheduler = lr_scheduler.CosineAnnealingLR(
+                self.optimizer,
+                T_max=total_steps,
+                eta_min=lr_actor * 0.1
+            )
+        elif lr_schedule == 'linear':
+            # 선형 감소: 초기 lr → 최종 lr (0.1 * initial_lr)
+            self.scheduler = lr_scheduler.LinearLR(
+                self.optimizer,
+                start_factor=1.0,
+                end_factor=0.1,
+                total_iters=total_steps
+            )
+        else:
+            # 스케줄링 없음
+            self.scheduler = None
         
         # 현재 잠재 상태 (에피소드 내 carry-over용)
         self.current_carry: Optional[LatentCarry] = None
@@ -712,15 +739,17 @@ class PPOAgent:
         
         return advantages, returns
     
-    def update(self, epochs: int = 10) -> Dict[str, float]:
+    def update(self, epochs: int = 10, progress: float = 0.0, return_gradients: bool = False) -> Dict[str, float]:
         """
         PPO 업데이트 with TRM 스타일 재귀 추론
         
         Args:
             epochs: 업데이트 에폭 수
+            progress: 학습 진행률 [0, 1] (사용 안 함, 호환성 유지)
+            return_gradients: True면 그래디언트만 계산하고 반환 (A3C용)
         
         Returns:
-            loss_info: 손실 정보 딕셔너리
+            loss_info: 손실 정보 딕셔너리 (return_gradients=True면 gradients도 포함)
         """
         if len(self.buffer['states']) == 0:
             return {}
@@ -771,6 +800,9 @@ class PPOAgent:
         total_ratio_mean = 0
         total_ratio_std = 0
         
+        # 그래디언트 저장용 (return_gradients=True일 때)
+        gradients = None
+        
         # 여러 에폭 동안 업데이트
         for epoch in range(epochs):
             # 현재 정책으로 평가
@@ -793,10 +825,16 @@ class PPOAgent:
             surr2 = torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon) * advantages
             policy_loss = -torch.min(surr1, surr2).mean()
             
-            # 가치 함수 손실
-            value_loss = F.mse_loss(values.squeeze(-1), returns)
+            # 가치 함수 손실 (클리핑 적용하여 안정화)
+            # Value loss 클리핑: 큰 오차를 제한하여 불안정성 방지
+            value_pred = values.squeeze(-1)
+            value_loss_clipped = torch.clamp(
+                (value_pred - returns).pow(2),
+                max=100.0  # 최대 손실 제한
+            ).mean()
+            value_loss = value_loss_clipped
             
-            # 엔트로피 손실
+            # 엔트로피 손실 (표준 PPO: 고정 계수 사용)
             entropy_loss = -entropy.mean()
             
             # 총 손실
@@ -805,8 +843,25 @@ class PPOAgent:
             # 역전파
             self.optimizer.zero_grad()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.actor_critic.parameters(), self.max_grad_norm)
-            self.optimizer.step()
+            # 그래디언트 클리핑 강화 (불안정성 방지)
+            torch.nn.utils.clip_grad_norm_(self.actor_critic.parameters(), self.max_grad_norm * 0.5)  # 더 강한 클리핑
+            
+            # 그래디언트 수집 (return_gradients=True일 때)
+            if return_gradients:
+                if gradients is None:
+                    gradients = {}
+                for name, param in self.actor_critic.named_parameters():
+                    if param.grad is not None:
+                        if name not in gradients:
+                            gradients[name] = param.grad.clone()
+                        else:
+                            gradients[name] += param.grad.clone()
+            else:
+                # 일반 모드: 가중치 업데이트
+                self.optimizer.step()
+                # 학습률 스케줄링 (매 에폭마다)
+                if self.scheduler is not None:
+                    self.scheduler.step()
             
             total_loss += loss.item()
             total_policy_loss += policy_loss.item()
@@ -816,7 +871,7 @@ class PPOAgent:
         # 버퍼 초기화
         self.reset_buffer()
         
-        return {
+        result = {
             'loss': total_loss / epochs,
             'policy_loss': total_policy_loss / epochs,
             'value_loss': total_value_loss / epochs,
@@ -826,10 +881,16 @@ class PPOAgent:
             'ratio_mean': total_ratio_mean / epochs,
             'ratio_std': total_ratio_std / epochs
         }
+        
+        # 그래디언트 반환 (있는 경우)
+        if return_gradients and gradients is not None:
+            result['gradients'] = gradients
+        
+        return result
     
     def save(self, path: str):
         """모델 저장"""
-        torch.save({
+        save_dict = {
             'actor_critic': self.actor_critic.state_dict(),
             'optimizer': self.optimizer.state_dict(),
             'config': {
@@ -838,7 +899,12 @@ class PPOAgent:
                 'carry_latent': self.carry_latent,
                 'latent_dim': self.latent_dim
             }
-        }, path)
+        }
+        # 스케줄러 상태 저장 (있는 경우)
+        if self.scheduler is not None:
+            save_dict['scheduler'] = self.scheduler.state_dict()
+        
+        torch.save(save_dict, path)
         print(f"Model saved to {path}")
     
     def load(self, path: str):
@@ -860,6 +926,10 @@ class PPOAgent:
             
             if 'optimizer' in checkpoint:
                 self.optimizer.load_state_dict(checkpoint['optimizer'])
+            
+            # 스케줄러 상태 로드 (있는 경우)
+            if 'scheduler' in checkpoint and self.scheduler is not None:
+                self.scheduler.load_state_dict(checkpoint['scheduler'])
             
             if 'config' in checkpoint:
                 config = checkpoint['config']

@@ -85,10 +85,10 @@ class CarRacingEnvWrapper(gym.Env):
         
         self.use_extended_actions = use_extended_actions
         
-        # 상태 공간: 16x16 grayscale 이미지 (256 차원)
+        # 상태 공간: 28x28 grayscale 이미지 (784 차원)
         self.observation_space = spaces.Box(
             low=0, high=255,
-            shape=(256,),
+            shape=(784,),
             dtype=np.uint8
         )
         
@@ -122,7 +122,7 @@ class CarRacingEnvWrapper(gym.Env):
     def _preprocess_image(self, img):
         """
         CarRacing 이미지를 RC Car 형식으로 변환
-        96x96 RGB -> 16x16 grayscale
+        96x96 RGB -> 28x28 grayscale
         """
         # Grayscale 변환
         if len(img.shape) == 3:
@@ -130,14 +130,14 @@ class CarRacingEnvWrapper(gym.Env):
         else:
             gray = img
         
-        # 16x16로 리사이즈
-        resized = cv2.resize(gray, (16, 16), interpolation=cv2.INTER_AREA)
+        # 28x28로 리사이즈 (더 많은 정보 보존)
+        resized = cv2.resize(gray, (28, 28), interpolation=cv2.INTER_AREA)
         
         # uint8로 변환
         resized = np.clip(resized, 0, 255).astype(np.uint8)
         
-        # 256차원 벡터로 flatten
-        return np.reshape(resized, 256)
+        # 784차원 벡터로 flatten
+        return np.reshape(resized, 784)
     
     def _convert_action(self, action):
         """

@@ -58,10 +58,10 @@ class RCCarEnv(gym.Env):
         self.use_extended_actions = use_extended_actions
         self.use_discrete_actions = use_discrete_actions
         
-        # 상태 공간: 16x16 grayscale 이미지 (256 차원)
+        # 상태 공간: 28x28 grayscale 이미지 (784 차원)
         self.observation_space = spaces.Box(
             low=0, high=255, 
-            shape=(256,), 
+            shape=(784,), 
             dtype=np.uint8
         )
         
@@ -105,9 +105,13 @@ class RCCarEnv(gym.Env):
         self.last_image = None
         self.stability_reward = 0.0
         
-        # 초기 상태 (카메라 이미지)
+        # 초기 상태 (카메라 이미지) - 28x28로 리사이즈
         img = self.rc_car.get_image_from_camera()
-        self.state = np.reshape(img, img.shape[0]**2).astype(np.uint8)
+        # 28x28로 리사이즈
+        import cv2
+        if img.shape[0] != 28 or img.shape[1] != 28:
+            img = cv2.resize(img, (28, 28), interpolation=cv2.INTER_AREA)
+        self.state = np.reshape(img, 784).astype(np.uint8)
         
         return self.state
     
@@ -207,9 +211,12 @@ class RCCarEnv(gym.Env):
         self.rc_car.set_left_speed(left_speed)
         self.rc_car.set_right_speed(right_speed)
         
-        # 다음 상태 관찰
+        # 다음 상태 관찰 - 28x28로 리사이즈
         img = self.rc_car.get_image_from_camera()
-        next_state = np.reshape(img, img.shape[0]**2).astype(np.uint8)
+        import cv2
+        if img.shape[0] != 28 or img.shape[1] != 28:
+            img = cv2.resize(img, (28, 28), interpolation=cv2.INTER_AREA)
+        next_state = np.reshape(img, 784).astype(np.uint8)
         
         # 리워드 계산
         reward = self._compute_reward(img, action)

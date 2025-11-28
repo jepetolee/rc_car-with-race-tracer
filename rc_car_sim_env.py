@@ -44,10 +44,10 @@ class RCCarSimEnv(gym.Env):
         self.use_extended_actions = use_extended_actions
         self.use_discrete_actions = use_discrete_actions
         
-        # 상태 공간: 16x16 grayscale 이미지 (256 차원)
+        # 상태 공간: 28x28 grayscale 이미지 (784 차원)
         self.observation_space = spaces.Box(
             low=0, high=255,
-            shape=(256,),
+            shape=(784,),
             dtype=np.uint8
         )
         
@@ -165,19 +165,19 @@ class RCCarSimEnv(gym.Env):
     def _get_camera_view(self):
         """
         카메라 시야 시뮬레이션
-        카의 위치와 각도를 기반으로 16x16 이미지 생성
+        카의 위치와 각도를 기반으로 28x28 이미지 생성
         """
-        img = np.zeros((16, 16), dtype=np.uint8)
+        img = np.zeros((28, 28), dtype=np.uint8)
         
         # 카의 앞쪽 방향 시뮬레이션
         view_distance = 50
         view_angle_range = math.pi / 3  # 60도 시야각
         
-        for i in range(16):
-            for j in range(16):
+        for i in range(28):
+            for j in range(28):
                 # 카메라 좌표계로 변환
-                cam_x = (j - 8) / 8.0 * view_distance
-                cam_y = i / 8.0 * view_distance
+                cam_x = (j - 14) / 14.0 * view_distance
+                cam_y = i / 14.0 * view_distance
                 
                 # 월드 좌표계로 변환
                 cos_a = math.cos(self.car_angle)
@@ -214,9 +214,9 @@ class RCCarSimEnv(gym.Env):
         self.distance_traveled = 0
         self.last_position = (self.car_x, self.car_y)
         
-        # 초기 상태
+        # 초기 상태 (28x28 = 784)
         img = self._get_camera_view()
-        state = np.reshape(img, img.shape[0]**2).astype(np.uint8)
+        state = np.reshape(img, 784).astype(np.uint8)
         
         return state
     
@@ -286,9 +286,9 @@ class RCCarSimEnv(gym.Env):
         
         self.last_position = (self.car_x, self.car_y)
         
-        # 다음 상태
+        # 다음 상태 (28x28 = 784)
         img = self._get_camera_view()
-        next_state = np.reshape(img, img.shape[0]**2).astype(np.uint8)
+        next_state = np.reshape(img, 784).astype(np.uint8)
         
         # 리워드 계산
         reward = self._compute_reward(img, action)
