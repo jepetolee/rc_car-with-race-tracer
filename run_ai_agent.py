@@ -183,7 +183,7 @@ class AIAgentRunner:
         """에이전트 생성 및 모델 로드"""
         # 에이전트 생성
         agent = PPOAgent(
-            state_dim=256,
+            state_dim=784,  # 28x28 이미지 = 784 차원 (환경 출력과 일치)
             action_dim=5,  # 이산 액션만 (고정)
             latent_dim=256,
             hidden_dim=256,
