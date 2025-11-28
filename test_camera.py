@@ -8,6 +8,7 @@ import cv2
 import numpy as np
 import sys
 import time
+import os
 
 try:
     from rc_car_interface import RC_Car_Interface
@@ -18,7 +19,7 @@ except ImportError as e:
     sys.exit(1)
 
 
-def test_camera():
+def test_camera(headless=False):
     """카메라 테스트"""
     print("📷 카메라 테스트 시작...")
     print("=" * 60)
@@ -31,7 +32,11 @@ def test_camera():
         
         print("\n2. 이미지 캡처 테스트...")
         print("   (원본 320x320 → 전처리 16x16)")
-        print("   'q' 키를 누르면 종료합니다.\n")
+        if not headless:
+            print("   'q' 키를 누르면 종료합니다.")
+        else:
+            print("   (헤드리스 모드: 100프레임 후 자동 종료)")
+        print()
         
         frame_count = 0
         start_time = time.time()
@@ -51,22 +56,32 @@ def test_camera():
             if frame_count % 10 == 0:  # 10프레임마다 출력
                 print(f"프레임 {frame_count}: 크기={original_size}, FPS={fps:.2f}")
             
-            # 16x16 이미지를 320x320으로 확대하여 표시
-            display_img = cv2.resize(img, (320, 320), interpolation=cv2.INTER_NEAREST)
+            if not headless:
+                try:
+                    # 16x16 이미지를 320x320으로 확대하여 표시
+                    display_img = cv2.resize(img, (320, 320), interpolation=cv2.INTER_NEAREST)
+                    
+                    # 텍스트 추가
+                    cv2.putText(display_img, f"Frame: {frame_count}", (10, 30),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                    cv2.putText(display_img, f"FPS: {fps:.1f}", (10, 60),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                    cv2.putText(display_img, "Press 'q' to quit", (10, 290),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                    
+                    # 이미지 표시
+                    cv2.imshow('RC Car Camera Test (16x16 -> 320x320)', display_img)
+                    
+                    # 'q' 키로 종료
+                    if cv2.waitKey(1) & 0xFF == ord('q'):
+                        break
+                except cv2.error:
+                    print("\n⚠️  디스플레이 오류: 헤드리스 모드로 전환합니다...")
+                    headless = True
+                    continue
             
-            # 텍스트 추가
-            cv2.putText(display_img, f"Frame: {frame_count}", (10, 30),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-            cv2.putText(display_img, f"FPS: {fps:.1f}", (10, 60),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-            cv2.putText(display_img, "Press 'q' to quit", (10, 290),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-            
-            # 이미지 표시
-            cv2.imshow('RC Car Camera Test (16x16 -> 320x320)', display_img)
-            
-            # 'q' 키로 종료
-            if cv2.waitKey(1) & 0xFF == ord('q'):
+            # 헤드리스 모드: 100프레임 후 자동 종료
+            if headless and frame_count >= 100:
                 break
         
         # 정리
@@ -75,12 +90,14 @@ def test_camera():
         print(f"   평균 FPS: {fps:.2f}")
         print(f"   실행 시간: {elapsed:.2f}초")
         
-        cv2.destroyAllWindows()
+        if not headless:
+            cv2.destroyAllWindows()
         rc_car.close()
         
     except KeyboardInterrupt:
         print("\n\n⚠️  사용자에 의해 중단되었습니다.")
-        cv2.destroyAllWindows()
+        if not headless:
+            cv2.destroyAllWindows()
         if 'rc_car' in locals():
             rc_car.close()
     
@@ -118,11 +135,14 @@ def test_single_image():
         cv2.imwrite(save_path, display_img)
         print(f"\n💾 이미지 저장: {save_path}")
         
-        # 이미지 표시
-        cv2.imshow('RC Car Camera Test (16x16 -> 320x320)', display_img)
-        print("\n이미지를 확인하세요. 아무 키나 누르면 종료합니다.")
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
+        # 이미지 표시 (디스플레이가 있는 경우에만)
+        try:
+            cv2.imshow('RC Car Camera Test (16x16 -> 320x320)', display_img)
+            print("\n이미지를 확인하세요. 아무 키나 누르면 종료합니다.")
+            cv2.waitKey(0)
+            cv2.destroyAllWindows()
+        except cv2.error:
+            print("\n(디스플레이 없음: 이미지만 저장되었습니다)")
         
         rc_car.close()
         
@@ -141,6 +161,8 @@ def main():
     parser = argparse.ArgumentParser(description='라즈베리 파이 카메라 테스트')
     parser.add_argument('--single', action='store_true',
                         help='단일 이미지만 캡처 (기본: 실시간 스트림)')
+    parser.add_argument('--headless', action='store_true',
+                        help='헤드리스 모드 (디스플레이 없이 실행)')
     
     args = parser.parse_args()
     
@@ -148,12 +170,16 @@ def main():
         print("❌ 카메라를 사용할 수 없습니다.")
         sys.exit(1)
     
+    # DISPLAY 환경 변수가 없으면 자동으로 헤드리스 모드
+    if not args.headless and 'DISPLAY' not in os.environ:
+        print("⚠️  DISPLAY 환경 변수가 없습니다. 헤드리스 모드로 실행합니다.")
+        args.headless = True
+    
     if args.single:
         test_single_image()
     else:
-        test_camera()
+        test_camera(headless=args.headless)
 
 
 if __name__ == '__main__':
     main()
-
