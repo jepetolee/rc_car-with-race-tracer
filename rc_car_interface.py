@@ -3,10 +3,18 @@
 #
 __author__ = 'will'
 
+import sys
+import os
+
 import numpy as np
 import cv2
 
 from picamera2 import Picamera2
+
+libcamera_system_path = '/usr/lib/python3/dist-packages'
+if libcamera_system_path not in sys.path:
+    sys.path.insert(1, libcamera_system_path)
+
 
 class RC_Car_Interface():
 
