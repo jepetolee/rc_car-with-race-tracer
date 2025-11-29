@@ -894,6 +894,87 @@ def inference():
         return jsonify({'error': str(e)}), 500
 
 
+# QR 데이터 저장 디렉토리
+QR_DATA_FOLDER = 'qr_dataset'
+os.makedirs(QR_DATA_FOLDER, exist_ok=True)
+os.makedirs(os.path.join(QR_DATA_FOLDER, 'qr_present'), exist_ok=True)
+os.makedirs(os.path.join(QR_DATA_FOLDER, 'qr_absent'), exist_ok=True)
+
+
+@app.route('/api/upload_qr_data', methods=['POST'])
+def upload_qr_data():
+    """
+    QR 데이터 업로드 (이미지 배치)
+    
+    요청:
+    - images: base64 인코딩된 이미지 리스트
+    - labels: 라벨 리스트 (0: QR 없음, 1: QR 있음)
+    - metadata: 메타데이터 (선택)
+    
+    응답:
+    - status: success
+    - saved_count: 저장된 이미지 수
+    """
+    try:
+        if not request.is_json:
+            return jsonify({'error': 'Content-Type must be application/json'}), 400
+        
+        data = request.json
+        images_base64 = data.get('images', [])
+        labels = data.get('labels', [])
+        metadata = data.get('metadata', {})
+        
+        if len(images_base64) != len(labels):
+            return jsonify({'error': 'Images and labels count mismatch'}), 400
+        
+        if len(images_base64) == 0:
+            return jsonify({'error': 'No images provided'}), 400
+        
+        import base64
+        import cv2
+        
+        saved_count = 0
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        
+        for i, (img_base64, label) in enumerate(zip(images_base64, labels)):
+            try:
+                # base64 디코딩
+                img_bytes = base64.b64decode(img_base64)
+                nparr = np.frombuffer(img_bytes, np.uint8)
+                img = cv2.imdecode(nparr, cv2.IMREAD_GRAYSCALE)
+                
+                if img is None:
+                    continue
+                
+                # 파일명 생성
+                label_str = 'qr_present' if label == 1 else 'qr_absent'
+                filename = f"{label_str}_{timestamp}_{i:04d}.png"
+                filepath = os.path.join(QR_DATA_FOLDER, label_str, filename)
+                
+                # 이미지 저장
+                cv2.imwrite(filepath, img)
+                saved_count += 1
+                
+            except Exception as e:
+                print(f"⚠️  이미지 {i} 저장 실패: {e}")
+                continue
+        
+        print(f"📥 QR 데이터 업로드: {saved_count}/{len(images_base64)}장 저장 완료")
+        
+        return jsonify({
+            'status': 'success',
+            'saved_count': saved_count,
+            'total_count': len(images_base64),
+            'metadata': metadata
+        })
+    
+    except Exception as e:
+        import traceback
+        error_msg = str(e)
+        traceback.print_exc()
+        return jsonify({'error': f'Server error: {error_msg}'}), 500
+
+
 def main():
     parser = argparse.ArgumentParser(description='RC Car 학습 서버 API')
     parser.add_argument('--host', type=str, default='0.0.0.0',

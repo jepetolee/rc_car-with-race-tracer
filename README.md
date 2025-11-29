@@ -1,8 +1,37 @@
 # RC Car 자율주행 프로젝트
 
+## 🎥 시연 영상
+
+프로젝트의 실제 동작을 확인할 수 있는 시연 영상입니다.
+
+### 시연 영상: RC Car 자율주행 및 QR 코드 감지
+
+<video width="640" height="480" controls>
+  <source src="rc_car_no_audio.mp4" type="video/mp4">
+  브라우저가 비디오 태그를 지원하지 않습니다. <a href="rc_car_no_audio.mp4">비디오 파일 다운로드</a>
+</video>
+
+**영상 내용:**
+- RC Car의 자율주행 동작
+- 선로 추적 및 주행
+- QR 코드 감지 및 자동 정지 기능
+- CNN 기반 QR 코드 분류 시스템
+
+**시연 시나리오:**
+1. RC Car가 선로를 따라 자율주행
+2. 선로에 배치된 QR 코드 감지
+3. QR 코드 감지 시 자동으로 4초간 정지
+4. 정지 후 자동으로 주행 재개
+
+> **참고:** 
+> - GitHub에서 비디오가 재생되지 않는 경우, 프로젝트를 클론한 후 로컬에서 `rc_car_no_audio.mp4` 파일을 직접 재생하세요.
+> - 비디오는 오디오가 없는 무음 영상입니다.
+
+---
 
 ## 목차
 
+0. [시연 영상](#-시연-영상)
 1. [시스템 개요 및 Arduino↔Raspberry Pi 명령 흐름](#1-시스템-개요-및-arduino↔raspberry-pi-명령-흐름)
 2. [데이터 수집과 유틸리티](#2-데이터-수집과-유틸리티)
 3. [학습 방법 개요와 주요 파라미터](#3-학습-방법-개요와-주요-파라미터)
@@ -99,6 +128,123 @@ python merge_demo_data.py -d uploaded_data -o merged.pkl
 python check_data_size.py uploaded_data/human_demos.pkl
 ```
 - 총 에피소드/스텝, 상태 차원, 결측 여부 확인
+
+### 2.4 QR 코드 데이터 수집 및 CNN 분류
+
+QR 코드를 CNN으로 분류하여 선로에 QR 코드가 있으면 멈추는 기능을 구현합니다.
+
+#### 2.4.1 QR 데이터 수집 (`collect_qr_data.py`)
+
+```bash
+# 대화형 모드 (사용자가 직접 라벨 입력)
+python collect_qr_data.py --output-dir qr_dataset
+
+# 자동 모드 (OpenCV QR 감지기로 자동 라벨링)
+python collect_qr_data.py --output-dir qr_dataset --auto-label --num-images 200
+```
+
+**대화형 모드 조작키:**
+- `q` 또는 `1`: QR 코드 있음으로 저장
+- `n` 또는 `0`: QR 코드 없음으로 저장
+- `s`: 통계 보기
+- `x` 또는 ESC: 종료
+
+**데이터 구조:**
+```
+qr_dataset/
+├── qr_present/      # QR 코드가 있는 이미지들
+├── qr_absent/       # QR 코드가 없는 이미지들
+└── metadata.json    # 메타데이터 (통계 등)
+```
+
+#### 2.4.2 CNN 모델 훈련 (`train_qr_cnn.py`)
+
+```bash
+# 기본 훈련
+python train_qr_cnn.py --data-dir qr_dataset --epochs 50
+
+# 작은 모델로 훈련 (빠른 추론)
+python train_qr_cnn.py --data-dir qr_dataset --model-type small --epochs 30
+
+# 학습률 조정
+python train_qr_cnn.py --data-dir qr_dataset --lr 0.001 --epochs 50
+```
+
+**주요 옵션:**
+- `--data-dir`: 데이터 디렉토리 경로 (필수)
+- `--model-type`: 모델 타입 (`standard` 또는 `small`, 기본: `standard`)
+- `--epochs`: 훈련 에폭 수 (기본: 50)
+- `--batch-size`: 배치 크기 (기본: 16)
+- `--lr`: 학습률 (기본: 0.001)
+- `--val-split`: 검증 데이터 비율 (기본: 0.2)
+
+**출력:**
+- 최고 모델: `trained_models/qr_cnn_{model_type}_best.pth`
+- 최종 모델: `trained_models/qr_cnn_{model_type}_{timestamp}.pth`
+
+#### 2.4.3 CNN 기반 QR 감지 및 차량 제어 (`detect_qr_with_cnn.py`)
+
+```bash
+# 하드웨어 제어 없이 감지만 테스트
+python detect_qr_with_cnn.py --model trained_models/qr_cnn_best.pth --no-hardware
+
+# 하드웨어 제어 포함 (QR 감지 시 차량 정지)
+python detect_qr_with_cnn.py --model trained_models/qr_cnn_best.pth --with-hardware
+
+# 임계값 조정
+python detect_qr_with_cnn.py --model trained_models/qr_cnn_best.pth --threshold 0.7
+```
+
+**주요 옵션:**
+- `--model`: 훈련된 모델 경로 (필수)
+- `--model-type`: 모델 타입 (`standard` 또는 `small`, 기본: `standard`)
+- `--no-hardware`: 하드웨어 제어 없이 감지만 테스트
+- `--with-hardware`: 하드웨어 제어 포함 테스트
+- `--duration`: 테스트 지속 시간 (초, 기본: 60)
+- `--threshold`: 감지 임계값 (기본: 0.5)
+- `--stop-duration`: QR 감지 시 정지 시간 (초, 기본: 4.0)
+
+#### 2.4.4 QR 데이터 서버 업로드 (`upload_qr_data.py`)
+
+수집한 QR 데이터를 서버로 스트리밍 전송합니다.
+
+```bash
+# 디렉토리에서 수집한 데이터 업로드
+python upload_qr_data.py --server 192.168.1.100:5000 --data-dir qr_dataset
+
+# 실시간 스트리밍 (카메라에서 직접 전송)
+python upload_qr_data.py --server 192.168.1.100:5000 --stream --duration 300
+
+# 스트리밍 간격 조정
+python upload_qr_data.py --server 192.168.1.100:5000 --stream --interval 0.5
+```
+
+**주요 옵션:**
+- `--server`: 서버 URL (기본: http://localhost:5000)
+- `--data-dir`: 업로드할 데이터 디렉토리
+- `--stream`: 실시간 스트리밍 모드
+- `--interval`: 스트리밍 모드에서 이미지 캡처 간격(초, 기본: 1.0)
+- `--duration`: 스트리밍 모드에서 지속 시간(초, 0=무한, 기본: 60)
+
+**서버 API 엔드포인트:**
+- `POST /api/upload_qr_data`: QR 데이터 (이미지 배치) 업로드
+  - 요청: `images` (base64 인코딩), `labels` (0 또는 1), `metadata` (선택)
+  - 응답: `saved_count`, `total_count`
+
+**전체 워크플로우:**
+```bash
+# 1. 데이터 수집 (라즈베리 파이)
+python collect_qr_data.py --output-dir qr_dataset
+
+# 2. 데이터를 서버로 업로드 (라즈베리 파이)
+python upload_qr_data.py --server SERVER_IP:5000 --data-dir qr_dataset
+
+# 3. 서버에서 모델 훈련
+python train_qr_cnn.py --data-dir qr_dataset --epochs 50
+
+# 4. 훈련된 모델을 라즈베리 파이로 다운로드 후 사용
+python detect_qr_with_cnn.py --model qr_cnn_best.pth --with-hardware
+```
 
 ---
 
