@@ -71,22 +71,22 @@ class QRCNNSmall(nn.Module):
     def __init__(self, input_size=160, num_classes=2):
         super(QRCNNSmall, self).__init__()
         
-        # Convolutional layers
-        self.conv1 = nn.Conv2d(1, 16, kernel_size=5, stride=2, padding=2)  # 160x160 -> 80x80
-        self.bn1 = nn.BatchNorm2d(16)
+        # Convolutional layers (경량화: 채널 수 감소)
+        self.conv1 = nn.Conv2d(1, 8, kernel_size=5, stride=2, padding=2)  # 160x160 -> 80x80
+        self.bn1 = nn.BatchNorm2d(8)
         self.pool1 = nn.MaxPool2d(2, 2)  # 80x80 -> 40x40
         
-        self.conv2 = nn.Conv2d(16, 32, kernel_size=5, stride=2, padding=2)  # 40x40 -> 20x20
-        self.bn2 = nn.BatchNorm2d(32)
+        self.conv2 = nn.Conv2d(8, 16, kernel_size=5, stride=2, padding=2)  # 40x40 -> 20x20
+        self.bn2 = nn.BatchNorm2d(16)
         self.pool2 = nn.MaxPool2d(2, 2)  # 20x20 -> 10x10
         
-        self.conv3 = nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1)  # 10x10 -> 5x5
-        self.bn3 = nn.BatchNorm2d(64)
+        self.conv3 = nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1)  # 10x10 -> 5x5
+        self.bn3 = nn.BatchNorm2d(32)
         
-        # Fully connected layers
-        self.fc1 = nn.Linear(64 * 5 * 5, 128)
+        # Fully connected layers (경량화: FC 크기 감소)
+        self.fc1 = nn.Linear(32 * 5 * 5, 64)
         self.dropout1 = nn.Dropout(0.5)
-        self.fc2 = nn.Linear(128, num_classes)
+        self.fc2 = nn.Linear(64, num_classes)
     
     def forward(self, x):
         # x shape: (batch_size, 1, 160, 160)

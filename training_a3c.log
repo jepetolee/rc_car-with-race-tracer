@@ -5956,3 +5956,146 @@ Model saved to trained_models/dqn_multi_best.pth
 [Coordinator] Worker 7 Ep104 | Reward: 98.70 | Avg(100): 331.02 | Steps: 2321503
 [Coordinator] Worker 3 Ep103 | Reward: 163.70 | Avg(100): 332.91 | Steps: 2324303
 [Coordinator] Worker 가중치 집계 완료 | Workers: [3] (1개) | Steps: 2324400
+[Coordinator] Worker 가중치 집계 완료 | Workers: [17] (1개) | Steps: 2325827
+[Coordinator] Worker 17 Ep104 | Reward: 693.22 | Avg(100): 332.66 | Steps: 2325827
+[Coordinator] Worker 21 Ep102 | Reward: 602.97 | Avg(100): 333.23 | Steps: 2325827
+[Coordinator] Worker 가중치 집계 완료 | Workers: [21] (1개) | Steps: 2325921
+[Coordinator] Worker 가중치 집계 완료 | Workers: [15] (1개) | Steps: 2326018
+[Coordinator] Worker 15 Ep104 | Reward: 1.40 | Avg(100): 332.63 | Steps: 2326018
+[Coordinator] Worker 가중치 집계 완료 | Workers: [8] (1개) | Steps: 2326396
+[Coordinator] Worker 8 Ep104 | Reward: 322.38 | Avg(100): 330.62 | Steps: 2326396
+[Coordinator] Worker 가중치 집계 완료 | Workers: [20] (1개) | Steps: 2326489
+[Coordinator] Worker 20 Ep102 | Reward: 61.15 | Avg(100): 331.71 | Steps: 2326489
+[Coordinator] Worker 가중치 집계 완료 | Workers: [5] (1개) | Steps: 2326584
+[Coordinator] Worker 5 Ep107 | Reward: 2.99 | Avg(100): 325.07 | Steps: 2326584
+[Coordinator] Worker 18 Ep102 | Reward: 346.04 | Avg(100): 328.18 | Steps: 2326584
+[Coordinator] Worker 가중치 집계 완료 | Workers: [18] (1개) | Steps: 2326683
+[Coordinator] Worker 가중치 집계 완료 | Workers: [19] (1개) | Steps: 2326879
+[Coordinator] Worker 19 Ep103 | Reward: 824.90 | Avg(100): 329.44 | Steps: 2326879
+[Coordinator] Worker 9 Ep102 | Reward: 169.78 | Avg(100): 326.58 | Steps: 2327156
+[Coordinator] Worker 가중치 집계 완료 | Workers: [9] (1개) | Steps: 2327244
+[Coordinator] Worker 1 Ep104 | Reward: 663.25 | Avg(100): 330.73 | Steps: 2327542
+[Coordinator] Worker 가중치 집계 완료 | Workers: [1] (1개) | Steps: 2327631
+[Coordinator] Worker 22 Ep101 | Reward: -20.15 | Avg(100): 324.87 | Steps: 2328852
+[Coordinator] Worker 가중치 집계 완료 | Workers: [22] (1개) | Steps: 2328951
+[Coordinator] Worker 가중치 집계 완료 | Workers: [11] (1개) | Steps: 2329424
+[Coordinator] Worker 11 Ep101 | Reward: 253.33 | Avg(100): 322.19 | Steps: 2329424
+[Coordinator] Worker 가중치 집계 완료 | Workers: [0] (1개) | Steps: 2330433
+[Coordinator] Worker 0 Ep101 | Reward: 535.71 | Avg(100): 326.06 | Steps: 2330433
+[Coordinator] Worker 6 Ep102 | Reward: 287.82 | Avg(100): 329.22 | Steps: 2330532
+[Coordinator] Worker 가중치 집계 완료 | Workers: [6] (1개) | Steps: 2330609
+[Coordinator] Worker 가중치 집계 완료 | Workers: [10] (1개) | Steps: 2331239
+[Coordinator] Worker 10 Ep107 | Reward: 32.14 | Avg(100): 327.16 | Steps: 2331239
+[Coordinator] Worker 가중치 집계 완료 | Workers: [14] (1개) | Steps: 2332449
+[Coordinator] Worker 14 Ep108 | Reward: 689.83 | Avg(100): 327.95 | Steps: 2332449
+[Coordinator] Worker 가중치 집계 완료 | Workers: [4] (1개) | Steps: 2332542
+[Coordinator] Worker 4 Ep103 | Reward: 513.97 | Avg(100): 334.23 | Steps: 2332542
+[Coordinator] Worker 가중치 집계 완료 | Workers: [13] (1개) | Steps: 2332720
+[Coordinator] Worker 13 Ep107 | Reward: 745.28 | Avg(100): 341.18 | Steps: 2332720
+[Coordinator] Worker 23 Ep105 | Reward: 268.42 | Avg(100): 344.45 | Steps: 2335575
+[Coordinator] Worker 가중치 집계 완료 | Workers: [23] (1개) | Steps: 2335663
+[Coordinator] Worker 7 Ep105 | Reward: -28.72 | Avg(100): 339.47 | Steps: 2339000
+[Coordinator] Worker 가중치 집계 완료 | Workers: [7] (1개) | Steps: 2339086
+[Coordinator] Worker 가중치 집계 완료 | Workers: [16] (1개) | Steps: 2341582
+[Coordinator] Worker 16 Ep103 | Reward: 230.03 | Avg(100): 335.91 | Steps: 2341582
+[Coordinator] Worker 17 Ep105 | Reward: -115.01 | Avg(100): 331.29 | Steps: 2342402
+[Coordinator] Worker 가중치 집계 완료 | Workers: [17] (1개) | Steps: 2342501
+[Coordinator] Worker 12 Ep104 | Reward: 457.14 | Avg(100): 336.89 | Steps: 2343256
+[Coordinator] Worker 가중치 집계 완료 | Workers: [12] (1개) | Steps: 2343350
+[Coordinator] Worker 2 Ep104 | Reward: 3.90 | Avg(100): 337.73 | Steps: 2343895
+[Coordinator] Worker 가중치 집계 완료 | Workers: [2] (1개) | Steps: 2343987
+[Coordinator] Worker 가중치 집계 완료 | Workers: [3] (1개) | Steps: 2348642
+[Coordinator] Worker 3 Ep104 | Reward: 50.16 | Avg(100): 332.14 | Steps: 2348642
+[Coordinator] Worker 20 Ep103 | Reward: -37.25 | Avg(100): 324.75 | Steps: 2349741
+[Coordinator] Worker 가중치 집계 완료 | Workers: [20] (1개) | Steps: 2349841
+[Coordinator] Worker 가중치 집계 완료 | Workers: [15] (1개) | Steps: 2350125
+[Coordinator] Worker 15 Ep105 | Reward: 342.51 | Avg(100): 323.58 | Steps: 2350125
+[Coordinator] Worker 21 Ep103 | Reward: 550.00 | Avg(100): 322.46 | Steps: 2350125
+[Coordinator] Worker 가중치 집계 완료 | Workers: [21] (1개) | Steps: 2350211
+[Coordinator] Worker 1 Ep105 | Reward: 1.08 | Avg(100): 314.22 | Steps: 2350588
+[Coordinator] Worker 가중치 집계 완료 | Workers: [1, 19, 8] (3개) | Steps: 2350685
+[Coordinator] Worker 19 Ep104 | Reward: 434.48 | Avg(100): 312.09 | Steps: 2350685
+[Coordinator] Worker 8 Ep105 | Reward: 108.47 | Avg(100): 306.54 | Steps: 2350685
+[Coordinator] Worker 18 Ep103 | Reward: 537.87 | Avg(100): 312.50 | Steps: 2350685
+[Coordinator] Worker 가중치 집계 완료 | Workers: [18] (1개) | Steps: 2350783
+[Coordinator] Worker 가중치 집계 완료 | Workers: [5] (1개) | Steps: 2351067
+[Coordinator] Worker 5 Ep108 | Reward: 488.24 | Avg(100): 314.95 | Steps: 2351067
+[Coordinator] Worker 가중치 집계 완료 | Workers: [9] (1개) | Steps: 2351165
+[Coordinator] Worker 9 Ep103 | Reward: 511.30 | Avg(100): 320.07 | Steps: 2351165
+[Coordinator] Worker 가중치 집계 완료 | Workers: [11] (1개) | Steps: 2352995
+[Coordinator] Worker 11 Ep102 | Reward: 35.85 | Avg(100): 320.14 | Steps: 2352995
+[Coordinator] Worker 가중치 집계 완료 | Workers: [22] (1개) | Steps: 2353194
+[Coordinator] Worker 22 Ep102 | Reward: 102.80 | Avg(100): 314.75 | Steps: 2353194
+[Coordinator] Worker 가중치 집계 완료 | Workers: [0] (1개) | Steps: 2354485
+[Coordinator] Worker 0 Ep102 | Reward: 680.65 | Avg(100): 322.31 | Steps: 2354485
+[Coordinator] Worker 6 Ep103 | Reward: -48.63 | Avg(100): 315.47 | Steps: 2354940
+[Coordinator] Worker 가중치 집계 완료 | Workers: [6] (1개) | Steps: 2355026
+[Coordinator] Worker 가중치 집계 완료 | Workers: [10] (1개) | Steps: 2355307
+[Coordinator] Worker 10 Ep108 | Reward: -48.45 | Avg(100): 311.06 | Steps: 2355307
+[Coordinator] Worker 가중치 집계 완료 | Workers: [14, 13] (2개) | Steps: 2356660
+[Coordinator] Worker 14 Ep109 | Reward: -1.64 | Avg(100): 310.35 | Steps: 2356660
+[Coordinator] Worker 13 Ep108 | Reward: 357.79 | Avg(100): 314.33 | Steps: 2356660
+[Coordinator] Worker 가중치 집계 완료 | Workers: [4] (1개) | Steps: 2356852
+[Coordinator] Worker 4 Ep104 | Reward: 375.61 | Avg(100): 318.86 | Steps: 2356852
+[Coordinator] Worker 가중치 집계 완료 | Workers: [23] (1개) | Steps: 2360016
+[Coordinator] Worker 23 Ep106 | Reward: 561.29 | Avg(100): 324.10 | Steps: 2360016
+[Coordinator] Worker 7 Ep106 | Reward: 93.33 | Avg(100): 320.71 | Steps: 2363375
+[Coordinator] Worker 가중치 집계 완료 | Workers: [7] (1개) | Steps: 2363460
+[Coordinator] Worker 가중치 집계 완료 | Workers: [16] (1개) | Steps: 2365445
+[Coordinator] Worker 16 Ep104 | Reward: 334.94 | Avg(100): 317.26 | Steps: 2365445
+[Coordinator] Worker 가중치 집계 완료 | Workers: [17] (1개) | Steps: 2365715
+[Coordinator] Worker 17 Ep106 | Reward: 134.04 | Avg(100): 313.76 | Steps: 2365715
+[Coordinator] Worker 12 Ep105 | Reward: 176.68 | Avg(100): 315.91 | Steps: 2366994
+[Coordinator] Worker 가중치 집계 완료 | Workers: [12] (1개) | Steps: 2367085
+[Coordinator] Worker 2 Ep105 | Reward: 534.69 | Avg(100): 316.32 | Steps: 2367716
+[Coordinator] Worker 가중치 집계 완료 | Workers: [2] (1개) | Steps: 2367807
+[Coordinator] Worker 가중치 집계 완료 | Workers: [3] (1개) | Steps: 2372672
+[Coordinator] Worker 3 Ep105 | Reward: 313.19 | Avg(100): 319.89 | Steps: 2372672
+[Coordinator] Worker 가중치 집계 완료 | Workers: [20] (1개) | Steps: 2372759
+[Coordinator] Worker 20 Ep104 | Reward: -83.11 | Avg(100): 310.65 | Steps: 2372759
+[Coordinator] Worker 가중치 집계 완료 | Workers: [21] (1개) | Steps: 2374137
+[Coordinator] Worker 21 Ep104 | Reward: 733.33 | Avg(100): 318.62 | Steps: 2374137
+[Coordinator] Worker 가중치 집계 완료 | Workers: [18] (1개) | Steps: 2374235
+[Coordinator] Worker 18 Ep104 | Reward: 46.10 | Avg(100): 319.10 | Steps: 2374235
+[Coordinator] Worker 가중치 집계 완료 | Workers: [15] (1개) | Steps: 2374591
+[Coordinator] Worker 15 Ep106 | Reward: 238.93 | Avg(100): 315.81 | Steps: 2374591
+[Coordinator] Worker 가중치 집계 완료 | Workers: [1] (1개) | Steps: 2374869
+[Coordinator] Worker 1 Ep106 | Reward: 647.57 | Avg(100): 316.23 | Steps: 2374869
+[Coordinator] Worker 가중치 집계 완료 | Workers: [19] (1개) | Steps: 2374960
+[Coordinator] Worker 19 Ep105 | Reward: 462.50 | Avg(100): 314.86 | Steps: 2374960
+[Coordinator] Worker 가중치 집계 완료 | Workers: [5, 9] (2개) | Steps: 2375127
+[Coordinator] Worker 5 Ep109 | Reward: 92.31 | Avg(100): 311.62 | Steps: 2375127
+[Coordinator] Worker 9 Ep104 | Reward: 260.14 | Avg(100): 314.28 | Steps: 2375127
+[Coordinator] Worker 가중치 집계 완료 | Workers: [8] (1개) | Steps: 2375597
+[Coordinator] Worker 8 Ep106 | Reward: 381.99 | Avg(100): 310.02 | Steps: 2375597
+[Coordinator] Worker 11 Ep103 | Reward: 592.31 | Avg(100): 313.29 | Steps: 2376799
+[Coordinator] Worker 가중치 집계 완료 | Workers: [11] (1개) | Steps: 2376886
+[Coordinator] Worker 22 Ep103 | Reward: 263.95 | Avg(100): 310.85 | Steps: 2377254
+[Coordinator] Worker 가중치 집계 완료 | Workers: [22] (1개) | Steps: 2377346
+[Coordinator] Worker 가중치 집계 완료 | Workers: [0] (1개) | Steps: 2378841
+[Coordinator] Worker 0 Ep103 | Reward: 278.74 | Avg(100): 313.39 | Steps: 2378841
+[Coordinator] Worker 가중치 집계 완료 | Workers: [6] (1개) | Steps: 2379035
+[Coordinator] Worker 6 Ep104 | Reward: 250.00 | Avg(100): 310.30 | Steps: 2379035
+[Coordinator] Worker 가중치 집계 완료 | Workers: [10] (1개) | Steps: 2379466
+[Coordinator] Worker 10 Ep109 | Reward: -7.35 | Avg(100): 304.23 | Steps: 2379466
+[Worker 14] Episode 110 | Reward: -49.66 | Local Steps: 99523 | Buffer: 8333/8333
+[Coordinator] Worker 14 Ep110 | Reward: -49.66 | Avg(100): 297.23 | Steps: 2380563
+[Coordinator] Worker 가중치 집계 완료 | Workers: [14] (1개) | Steps: 2380652
+[Coordinator] Worker 가중치 집계 완료 | Workers: [13] (1개) | Steps: 2380839
+[Coordinator] Worker 13 Ep109 | Reward: 632.39 | Avg(100): 297.02 | Steps: 2380839
+[Coordinator] Worker 가중치 집계 완료 | Workers: [4] (1개) | Steps: 2381125
+[Coordinator] Worker 4 Ep105 | Reward: 239.87 | Avg(100): 297.74 | Steps: 2381125
+[Coordinator] Worker 20 Ep105 | Reward: -24.04 | Avg(100): 292.63 | Steps: 2382706
+[Coordinator] Worker 가중치 집계 완료 | Workers: [20] (1개) | Steps: 2382799
+[Coordinator] Worker 16 Ep105 | Reward: 63.10 | Avg(100): 292.44 | Steps: 2382987
+[Coordinator] Worker 가중치 집계 완료 | Workers: [16] (1개) | Steps: 2383069
+[Coordinator] Worker 가중치 집계 완료 | Workers: [23] (1개) | Steps: 2384244
+[Coordinator] Worker 23 Ep107 | Reward: 849.42 | Avg(100): 298.33 | Steps: 2384244
+[Coordinator] Worker 가중치 집계 완료 | Workers: [17] (1개) | Steps: 2386902
+[Coordinator] Worker 17 Ep107 | Reward: 38.13 | Avg(100): 299.17 | Steps: 2386902
+[Coordinator] Worker 7 Ep107 | Reward: 26.54 | Avg(100): 296.69 | Steps: 2387339
+[Coordinator] Worker 가중치 집계 완료 | Workers: [7] (1개) | Steps: 2387420
+[Coordinator] Worker 12 Ep106 | Reward: 87.50 | Avg(100): 298.27 | Steps: 2388023
+[Coordinator] Worker 가중치 집계 완료 | Workers: [12] (1개) | Steps: 2388108
+[Coordinator] Worker 가중치 집계 완료 | Workers: [2] (1개) | Steps: 2391686
+[Coordinator] Worker 2 Ep106 | Reward: 251.35 | Avg(100): 298.12 | Steps: 2391686
