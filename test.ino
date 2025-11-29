@@ -6,14 +6,14 @@ AF_DCMotor motor2(2);
 
 // 명령어 버퍼
 String command = "";
-char commandType = 'S';  // F: Forward, L: Left+Gas, R: Right+Gas, S: Stop, X: Brake
+char commandType = 'S';  // F: Forward, B: Backward, L: Left+Gas, R: Right+Gas, S: Stop, X: Brake
 int speedValue = 0;
-const unsigned long COMMAND_DURATION_MS = 300;  // 최소 명령 지속 시간: 100ms (0.1초)
+const unsigned long COMMAND_DURATION_MS = 250;  // 최소 명령 지속 시간: 100ms (0.1초)
 bool commandActive = false;
 unsigned long commandStartTime = 0;
 
 // 기본 속도 설정
-const int DEFAULT_SPEED = 250;
+const int DEFAULT_SPEED = 220;
 const int TURN_SPEED_HIGH = 220;
 const int TURN_SPEED_LOW = 50;
 
@@ -29,6 +29,7 @@ void setup() {
   
   Serial.println("RC Car Ready! (CarRacing Compatible)");
   Serial.println("Actions: 0=Stop, 1=Right+Gas, 2=Left+Gas, 3=Gas, 4=Brake");
+  Serial.println("Commands: F=Forward, B=Backward, L=Left, R=Right, S=Stop, stop=Backward");
 }
 
 void loop() {
@@ -71,8 +72,13 @@ void loop() {
         } else {
           Serial.println("Invalid action number (0-4)");
         }
+      } else if (command.equalsIgnoreCase("stop")) {
+        // "stop" 텍스트 명령: 뒤로 가기
+        executeCommand('B', DEFAULT_SPEED);
+        commandActive = true;
+        commandStartTime = millis();
       } else {
-        // 기존 명령어 형식: [F/L/R/S/X][속도]
+        // 기존 명령어 형식: [F/L/R/S/X/B][속도]
         commandType = command.charAt(0);
         
         // 속도 값 파싱
@@ -154,7 +160,7 @@ void executeDiscreteAction(int action) {
   }
 }
 
-// 레거시 명령어 실행 (후진 제거됨)
+// 레거시 명령어 실행 (F: Forward, B: Backward, L: Left+Gas, R: Right+Gas, S: Stop, X: Brake)
 void executeCommand(char cmd, int speed) {
   switch(cmd) {
     case 'F':  // Forward (직진 + 가스)
@@ -195,6 +201,14 @@ void executeCommand(char cmd, int speed) {
       motor1.run(RELEASE);
       motor2.run(RELEASE);
       Serial.println("Brake -> Stop");
+      break;
+      
+    case 'B':  // Backward (뒤로 가기)
+      motor1.setSpeed(speed);
+      motor2.setSpeed(speed);
+      motor1.run(BACKWARD);
+      motor2.run(BACKWARD);
+      Serial.println("Backward");
       break;
       
     default:
