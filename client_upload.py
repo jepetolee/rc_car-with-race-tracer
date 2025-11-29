@@ -26,11 +26,55 @@ class ServerClient:
     def health_check(self):
         """서버 상태 확인"""
         try:
-            response = requests.get(f"{self.server_url}/api/health", timeout=5)
+            print(f"   서버 URL: {self.server_url}")
+            
+            # 여러 방법으로 시도
+            import socket
+            from urllib.parse import urlparse
+            
+            parsed = urlparse(self.server_url)
+            host = parsed.hostname
+            port = parsed.port or 5000
+            
+            # 1. 소켓 연결 테스트
+            print(f"   소켓 연결 테스트 중...")
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(5)
+                result = sock.connect_ex((host, port))
+                sock.close()
+                if result == 0:
+                    print(f"   ✅ 포트 {port}는 열려있습니다")
+                else:
+                    print(f"   ❌ 포트 {port} 연결 실패 (코드: {result})")
+                    return None
+            except Exception as e:
+                print(f"   ⚠️  소켓 테스트 실패: {e}")
+            
+            # 2. HTTP 요청
+            print(f"   HTTP 요청 전송 중...")
+            response = requests.get(f"{self.server_url}/api/health", timeout=10)
             response.raise_for_status()
-            return response.json()
+            result = response.json()
+            print(f"   ✅ 서버 응답: {result}")
+            return result
+        except requests.exceptions.ConnectTimeout:
+            print(f"   ❌ HTTP 연결 타임아웃")
+            print(f"   서버가 실행 중인지 확인하세요")
+            print(f"   서버에서 실행: python server_api.py --host 0.0.0.0 --port 5000")
+            return None
+        except requests.exceptions.ConnectionError as e:
+            print(f"   ❌ HTTP 연결 실패: {e}")
+            print(f"   가능한 원인:")
+            print(f"   1. 서버가 실행 중이 아닙니다")
+            print(f"   2. 서버가 localhost(127.0.0.1)에서만 실행 중입니다")
+            print(f"      → --host 0.0.0.0으로 실행해야 합니다")
+            print(f"   3. 포트 포워딩이 제대로 설정되지 않았습니다")
+            return None
         except Exception as e:
-            print(f"❌ 서버 연결 실패: {e}")
+            print(f"   ❌ 서버 상태 확인 실패: {e}")
+            import traceback
+            traceback.print_exc()
             return None
     
     def upload_data(self, file_path, chunk_size_kb=256):
@@ -63,7 +107,16 @@ class ServerClient:
         print("🔍 서버 연결 확인 중...")
         health = self.health_check()
         if not health:
-            print(f"❌ 서버에 연결할 수 없습니다: {self.server_url}")
+            print()
+            print("💡 문제 해결 방법:")
+            print("   1. 서버가 실행 중인지 확인:")
+            print(f"      서버에서: python server_api.py --host 0.0.0.0 --port 5000")
+            print("   2. 방화벽 확인:")
+            print(f"      서버에서: sudo ufw allow 5000")
+            print("   3. 포트 확인:")
+            print(f"      서버에서: netstat -tuln | grep 5000")
+            print("   4. 다른 포트 사용 시:")
+            print(f"      --server http://39.122.167.174:다른포트")
             return None
         print(f"✅ 서버 연결 확인: {health.get('status', 'unknown')}")
         print()
