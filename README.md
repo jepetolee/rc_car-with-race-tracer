@@ -6,10 +6,7 @@
 
 ### 시연 영상: RC Car 자율주행 및 QR 코드 감지
 
-<video width="640" height="480" controls>
-  <source src="rc_car_no_audio.mp4" type="video/mp4">
-  브라우저가 비디오 태그를 지원하지 않습니다. <a href="rc_car_no_audio.mp4">비디오 파일 다운로드</a>
-</video>
+![RC Car 시연 영상](rc_car.gif)
 
 **영상 내용:**
 - RC Car의 자율주행 동작
@@ -22,10 +19,6 @@
 2. 선로에 배치된 QR 코드 감지
 3. QR 코드 감지 시 자동으로 4초간 정지
 4. 정지 후 자동으로 주행 재개
-
-> **참고:** 
-> - GitHub에서 비디오가 재생되지 않는 경우, 프로젝트를 클론한 후 로컬에서 `rc_car_no_audio.mp4` 파일을 직접 재생하세요.
-> - 비디오는 오디오가 없는 무음 영상입니다.
 
 ---
 
@@ -616,18 +609,23 @@ python run_ai_agent.py \
 3. 4초간 정지 후 자동 제어 재개
 4. QR 코드 데이터가 로그에 출력됨
 
-**QR 코드 테스트:**
+**QR 코드 테스트 (CNN 기반):**
 
 ```bash
-# QR 코드 감지 기능만 테스트 (하드웨어 제어 없음)
-python test_qr_detection.py
+# CNN 모델을 사용한 QR 코드 감지 테스트 (하드웨어 제어 없음)
+python test_qr_detection.py --model trained_models/qr_cnn_best.pth
 
 # 60초 동안 테스트
-python test_qr_detection.py --duration 60
+python test_qr_detection.py --model trained_models/qr_cnn_best.pth --duration 60
 
-# 하드웨어 제어 포함 테스트
-python test_qr_detection.py --with-hardware --duration 60
+# 하드웨어 제어 포함 테스트 (QR 감지 시 차량 정지)
+python test_qr_detection.py --model trained_models/qr_cnn_best.pth --with-hardware --duration 60
+
+# 작은 모델 사용 및 임계값 조정
+python test_qr_detection.py --model trained_models/qr_cnn_small_best.pth --model-type small --threshold 0.7
 ```
+
+> **참고:** `test_qr_detection.py`는 훈련된 CNN 모델을 사용하여 QR 코드를 감지합니다. OpenCV의 기본 QR 감지기가 아닌 CNN 분류 모델을 사용하므로 더 정확한 감지가 가능합니다.
 
 #### 8.3.3 서버에서 다운로드한 모델로 시험 주행
 
