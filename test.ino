@@ -6,7 +6,7 @@ AF_DCMotor motor2(2);
 
 // 명령어 버퍼
 String command = "";
-char commandType = 'S';  // F: Forward, B: Backward, L: Left+Gas, R: Right+Gas, S: Stop, X: Brake
+char commandType = 'S';  // F: Forward, B: Backward, L: Left+Gas, R: Right+Gas, S: Backward, X: Stop
 int speedValue = 0;
 const unsigned long COMMAND_DURATION_MS = 250;  // 최소 명령 지속 시간: 100ms (0.1초)
 bool commandActive = false;
@@ -108,9 +108,9 @@ void loop() {
     }
   }
 
-  // 자동 정지 (안전 기능)
+  // 자동 정지 (안전 기능) - COMMAND_DURATION_MS만큼 지나면 자동 정지
   if (commandActive && millis() - commandStartTime >= COMMAND_DURATION_MS) {
-    executeCommand('S', 0);
+    executeCommand('X', 0);  // 'X' (Brake)로 정지
     commandActive = false;
   }
 }
@@ -162,7 +162,7 @@ void executeDiscreteAction(int action) {
   }
 }
 
-// 레거시 명령어 실행 (F: Forward, B: Backward, L: Left+Gas, R: Right+Gas, S: Stop, X: Brake)
+// 레거시 명령어 실행 (F: Forward, B: Backward, L: Left+Gas, R: Right+Gas, S: Backward, X: Stop)
 void executeCommand(char cmd, int speed) {
   switch(cmd) {
     case 'F':  // Forward (직진 + 가스)
@@ -189,20 +189,20 @@ void executeCommand(char cmd, int speed) {
       Serial.println("Right + Gas");
       break;
       
-    case 'S':  // Stop → Backward (뒤로 가기)
+    case 'S':  // Backward (뒤로 가기)
       motor1.setSpeed(DEFAULT_SPEED);
       motor2.setSpeed(DEFAULT_SPEED);
       motor1.run(BACKWARD);
       motor2.run(BACKWARD);
-      Serial.println("Stop -> Backward");
+      Serial.println("Backward (S)");
       break;
       
-    case 'X':  // Brake → Stop (RC Car에서는 동일)
+    case 'X':  // Stop (정지) - 자동 정지 기능에서도 사용
       motor1.setSpeed(0);
       motor2.setSpeed(0);
       motor1.run(RELEASE);
       motor2.run(RELEASE);
-      Serial.println("Brake -> Stop");
+      Serial.println("Stop (X)");
       break;
       
     case 'B':  // Backward (뒤로 가기)
