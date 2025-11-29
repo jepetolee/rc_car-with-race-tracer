@@ -58,14 +58,28 @@ def upload_data_init():
     - session_id: 세션 ID
     """
     try:
+        if not request.is_json:
+            return jsonify({'error': 'Content-Type must be application/json'}), 400
+        
         data = request.json
+        if not data:
+            return jsonify({'error': 'No JSON data provided'}), 400
+        
         filename = data.get('filename')
         file_size = data.get('file_size')
         chunk_size = data.get('chunk_size')
         total_chunks = data.get('total_chunks')
         
-        if not all([filename, file_size, chunk_size, total_chunks]):
-            return jsonify({'error': 'Missing required fields'}), 400
+        if not all([filename, file_size is not None, chunk_size is not None, total_chunks is not None]):
+            return jsonify({
+                'error': 'Missing required fields',
+                'received': {
+                    'filename': filename,
+                    'file_size': file_size,
+                    'chunk_size': chunk_size,
+                    'total_chunks': total_chunks
+                }
+            }), 400
         
         # 세션 ID 생성
         session_id = str(uuid.uuid4())
@@ -88,7 +102,10 @@ def upload_data_init():
         })
     
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        import traceback
+        error_msg = str(e)
+        traceback.print_exc()
+        return jsonify({'error': f'Server error: {error_msg}'}), 500
 
 
 @app.route('/api/upload_data/chunk', methods=['POST'])

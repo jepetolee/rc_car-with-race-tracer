@@ -59,30 +59,55 @@ class ServerClient:
         print(f"📦 총 청크 수: {total_chunks}")
         print()
         
+        # 서버 상태 확인
+        print("🔍 서버 연결 확인 중...")
+        health = self.health_check()
+        if not health:
+            print(f"❌ 서버에 연결할 수 없습니다: {self.server_url}")
+            return None
+        print(f"✅ 서버 연결 확인: {health.get('status', 'unknown')}")
+        print()
+        
         try:
             # 1. 업로드 초기화
             print("🔄 업로드 초기화 중...")
-            init_data = {
-                'filename': os.path.basename(file_path),
-                'file_size': file_size,
-                'chunk_size': chunk_size,
-                'total_chunks': total_chunks
-            }
-            response = requests.post(
-                f"{self.server_url}/api/upload_data/init",
-                json=init_data,
-                timeout=10
-            )
-            response.raise_for_status()
-            result = response.json()
-            session_id = result.get('session_id')
-            
-            if not session_id:
-                print(f"❌ 세션 ID를 받지 못했습니다")
+            try:
+                init_data = {
+                    'filename': os.path.basename(file_path),
+                    'file_size': file_size,
+                    'chunk_size': chunk_size,
+                    'total_chunks': total_chunks
+                }
+                response = requests.post(
+                    f"{self.server_url}/api/upload_data/init",
+                    json=init_data,
+                    timeout=30  # 타임아웃 증가
+                )
+                response.raise_for_status()
+                result = response.json()
+                session_id = result.get('session_id')
+                
+                if not session_id:
+                    print(f"❌ 세션 ID를 받지 못했습니다")
+                    print(f"   응답: {result}")
+                    return None
+                
+                print(f"✅ 세션 ID: {session_id}")
+                print()
+            except requests.exceptions.Timeout:
+                print(f"❌ 초기화 타임아웃 (서버 연결 확인 필요)")
+                print(f"   서버 URL: {self.server_url}")
                 return None
-            
-            print(f"✅ 세션 ID: {session_id}")
-            print()
+            except requests.exceptions.ConnectionError as e:
+                print(f"❌ 서버 연결 실패: {e}")
+                print(f"   서버 URL: {self.server_url}")
+                print(f"   서버가 실행 중인지 확인하세요")
+                return None
+            except Exception as e:
+                print(f"❌ 초기화 실패: {e}")
+                import traceback
+                traceback.print_exc()
+                return None
             
             # 2. 청크 단위로 전송
             print("📤 청크 전송 시작...")
@@ -107,13 +132,20 @@ class ServerClient:
                         'chunk_size': len(chunk)
                     }
                     
-                    response = requests.post(
-                        f"{self.server_url}/api/upload_data/chunk",
-                        files=files,
-                        data=data,
-                        timeout=30
-                    )
-                    response.raise_for_status()
+                    try:
+                        response = requests.post(
+                            f"{self.server_url}/api/upload_data/chunk",
+                            files=files,
+                            data=data,
+                            timeout=60  # 타임아웃 증가
+                        )
+                        response.raise_for_status()
+                    except requests.exceptions.Timeout:
+                        print(f"\n❌ 청크 {chunk_index} 전송 타임아웃")
+                        return None
+                    except Exception as e:
+                        print(f"\n❌ 청크 {chunk_index} 전송 실패: {e}")
+                        return None
                     
                     chunk_index += 1
             
@@ -122,16 +154,23 @@ class ServerClient:
             
             # 3. 업로드 완료 신호
             print("🔄 파일 조립 중...")
-            finish_data = {
-                'session_id': session_id
-            }
-            response = requests.post(
-                f"{self.server_url}/api/upload_data/finish",
-                json=finish_data,
-                timeout=60
-            )
-            response.raise_for_status()
-            result = response.json()
+            try:
+                finish_data = {
+                    'session_id': session_id
+                }
+                response = requests.post(
+                    f"{self.server_url}/api/upload_data/finish",
+                    json=finish_data,
+                    timeout=120  # 타임아웃 증가 (파일 조립 시간 고려)
+                )
+                response.raise_for_status()
+                result = response.json()
+            except requests.exceptions.Timeout:
+                print(f"❌ 파일 조립 타임아웃")
+                return None
+            except Exception as e:
+                print(f"❌ 파일 조립 실패: {e}")
+                return None
             
             print(f"✅ 업로드 완료!")
             print(f"   파일: {result.get('filename')}")
