@@ -504,6 +504,9 @@ def train_imitation_rl_api():
     - final_match_rate: 최종 일치율
     """
     try:
+        if not request.is_json:
+            return jsonify({'error': 'Content-Type must be application/json'}), 400
+        
         data = request.json
         if not data:
             return jsonify({'error': 'No JSON data provided'}), 400
@@ -515,16 +518,36 @@ def train_imitation_rl_api():
         learning_rate = data.get('learning_rate', 3e-4)
         
         print(f"📚 Imitation RL 학습 요청:")
+        print(f"   받은 데이터: {data}")
         print(f"   파일: {file_path}")
         print(f"   에폭: {epochs}")
         print(f"   배치 크기: {batch_size}")
         print(f"   학습률: {learning_rate}")
         
         if not file_path:
-            return jsonify({'error': 'file_path is required'}), 400
+            return jsonify({
+                'error': 'file_path is required',
+                'received_data': data
+            }), 400
+        
+        # 파일 경로 확인 (절대 경로 또는 상대 경로)
+        if not os.path.isabs(file_path):
+            # 상대 경로인 경우 UPLOAD_FOLDER 기준으로 변환
+            file_path = os.path.join(UPLOAD_FOLDER, os.path.basename(file_path))
+        
+        print(f"   실제 파일 경로: {file_path}")
+        print(f"   파일 존재 여부: {os.path.exists(file_path)}")
         
         if not os.path.exists(file_path):
-            return jsonify({'error': f'File not found: {file_path}'}), 400
+            # 파일을 찾을 수 없을 때 가능한 파일 목록 표시
+            available_files = []
+            if os.path.exists(UPLOAD_FOLDER):
+                available_files = [f for f in os.listdir(UPLOAD_FOLDER) if f.endswith('.pkl')]
+            return jsonify({
+                'error': f'File not found: {file_path}',
+                'upload_folder': UPLOAD_FOLDER,
+                'available_files': available_files[:10]  # 최대 10개만 표시
+            }), 400
         
         # 디바이스 선택 (GPU 사용 가능하면 cuda, 아니면 cpu)
         device = 'cuda' if torch.cuda.is_available() else 'cpu'

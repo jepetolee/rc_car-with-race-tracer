@@ -301,8 +301,23 @@ class ServerClient:
             )
             response.raise_for_status()
             return response.json()
+        except requests.exceptions.HTTPError as e:
+            print(f"❌ 학습 요청 실패: {e}")
+            if e.response is not None:
+                try:
+                    error_detail = e.response.json()
+                    print(f"   상세 에러: {error_detail}")
+                    if 'available_files' in error_detail:
+                        print(f"   사용 가능한 파일:")
+                        for f in error_detail['available_files']:
+                            print(f"      - {f}")
+                except:
+                    print(f"   응답 내용: {e.response.text}")
+            return None
         except Exception as e:
             print(f"❌ 학습 요청 실패: {e}")
+            import traceback
+            traceback.print_exc()
             return None
     
     def download_model(self, save_path='latest_model.pth'):
