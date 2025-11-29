@@ -4,8 +4,8 @@
 PYTHONUNBUFFERED=1 nohup python3 train_a3c.py \
     --use-recurrent \
     --update-frequency 2048 \
-    --num-workers 20 \
-    --total-steps 1000000 \
+    --num-workers 16 \
+    --total-steps 4000000 \
     --state-dim 784 \
     --hidden-dim 256 \
     --entropy-coef 0.02 \

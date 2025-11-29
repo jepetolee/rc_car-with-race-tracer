@@ -161,51 +161,93 @@ def worker(worker_id, global_agent, args, global_step, global_episode,
                     # 업데이트 전 버퍼 크기 저장 (로깅용)
                     buffer_size_before = len(local_agent.buffer['states'])
                     
-                    # 로컬에서 그래디언트 계산 (A3C 스타일: 그래디언트 기반)
                     # 진행률 계산 (엔트로피 스케줄링용)
                     progress = min(global_step.value / args.total_steps, 1.0) if args.total_steps > 0 else 0.0
-                    loss_info = local_agent.update(epochs=args.update_epochs, progress=progress, return_gradients=True)
                     
-                    # 글로벌 에이전트에 그래디언트 적용 (A3C 원래 방식)
-                    with lock:
-                        if 'gradients' in loss_info:
+                    # TRM Step-wise Update: 각 Epoch마다 동기화, Epoch 내에서는 K번 연속 수행
+                    # 이렇게 하면 TRM의 점진적 개선 효과를 유지하면서도 안정성 확보
+                    total_loss_sum = 0
+                    total_policy_loss_sum = 0
+                    total_value_loss_sum = 0
+                    total_entropy_sum = 0
+                    
+                    # 모든 Epoch의 그래디언트를 누적
+                    accumulated_gradients = None
+                    
+                    for epoch in range(args.update_epochs):
+                        # 각 Epoch 시작 시에만 메인 모델과 동기화
+                        with lock:
+                            local_agent.actor_critic.load_state_dict(
+                                global_agent.actor_critic.state_dict()
+                            )
+                        
+                        # Epoch 내에서 K번의 Supervision Step을 연속으로 수행
+                        # (TRM의 점진적 개선 효과 유지)
+                        loss_info = local_agent.update(
+                            epochs=1,  # 한 Epoch = K번의 Step
+                            progress=progress, 
+                            return_gradients=True,
+                            supervision_step_only=False  # 전체 K번 수행
+                        )
+                        
+                        # 그래디언트 누적
+                        if 'gradients' in loss_info and loss_info['gradients']:
                             gradients = loss_info['gradients']
                             
+                            if accumulated_gradients is None:
+                                accumulated_gradients = {}
+                                for name, grad in gradients.items():
+                                    accumulated_gradients[name] = grad.clone()
+                            else:
+                                # 그래디언트 누적
+                                for name, grad in gradients.items():
+                                    if name in accumulated_gradients:
+                                        accumulated_gradients[name] += grad.clone()
+                                    else:
+                                        accumulated_gradients[name] = grad.clone()
+                        
+                        # 통계 누적
+                        if loss_info:
+                            total_loss_sum += loss_info.get('loss', 0)
+                            total_policy_loss_sum += loss_info.get('policy_loss', 0)
+                            total_value_loss_sum += loss_info.get('value_loss', 0)
+                            total_entropy_sum += loss_info.get('entropy', 0)
+                    
+                    # 모든 Epoch의 그래디언트를 한 번에 적용 (Lock 경합 감소)
+                    with lock:
+                        if accumulated_gradients is not None:
                             # 글로벌 네트워크에 그래디언트 적용
                             global_agent.optimizer.zero_grad()
                             
-                            # 그래디언트 설정 (A3C: 각 워커의 그래디언트를 그대로 적용)
+                            # 누적된 그래디언트 설정
                             for name, param in global_agent.actor_critic.named_parameters():
-                                if name in gradients:
-                                    param.grad = gradients[name].clone()
+                                if name in accumulated_gradients:
+                                    param.grad = accumulated_gradients[name].clone()
                             
-                            # 그래디언트 클리핑 강화 (불안정성 방지)
+                            # 그래디언트 클리핑
                             torch.nn.utils.clip_grad_norm_(
                                 global_agent.actor_critic.parameters(), 
-                                global_agent.max_grad_norm * 0.5  # 더 강한 클리핑
+                                global_agent.max_grad_norm
                             )
                             
                             # 글로벌 가중치 업데이트
                             global_agent.optimizer.step()
                             
-                            # 학습률 스케줄링 제거 (A3C에서는 불필요)
-                            # if global_agent.scheduler is not None:
-                            #     global_agent.scheduler.step()
-                            
-                            # 로컬 에이전트를 글로벌로 동기화
+                            # 최종 동기화 (다음 업데이트를 위해)
                             local_agent.actor_critic.load_state_dict(
                                 global_agent.actor_critic.state_dict()
                             )
-                        
-                        # 업데이트 정보 출력 (워커 0만)
-                        if worker_id == 0 and loss_info:
-                            current_step = global_step.value
-                            print(f"[Update] Step {current_step}: "
-                                  f"Loss={loss_info.get('loss', 0):.4f}, "
-                                  f"π={loss_info.get('policy_loss', 0):.4f}, "
-                                  f"V={loss_info.get('value_loss', 0):.4f}, "
-                                  f"H={loss_info.get('entropy', 0):.3f}, "
-                                  f"Buffer={buffer_size_before}", flush=True)
+                    
+                    # 업데이트 정보 출력 (워커 0만, 평균값)
+                    if worker_id == 0:
+                        n_steps = args.update_epochs * local_agent.n_supervision_steps
+                        current_step = global_step.value
+                        print(f"[Update] Step {current_step}: "
+                              f"Loss={total_loss_sum/args.update_epochs:.4f}, "
+                              f"π={total_policy_loss_sum/args.update_epochs:.4f}, "
+                              f"V={total_value_loss_sum/args.update_epochs:.4f}, "
+                              f"H={total_entropy_sum/args.update_epochs:.3f}, "
+                              f"Buffer={buffer_size_before}", flush=True)
                 
                 if done or episode_length >= args.max_episode_steps:
                     break

@@ -13,7 +13,7 @@ import torch.nn.functional as F
 import numpy as np
 from collections import deque
 from dataclasses import dataclass
-from typing import Optional, Tuple, Dict
+from typing import Optional, Tuple, Dict, List
 
 
 @dataclass
@@ -80,7 +80,10 @@ class RecurrentActorCritic(nn.Module):
         action_dim: int = 2,
         latent_dim: int = 256,
         hidden_dim: int = 256,
-        n_cycles: int = 4,
+        n_cycles: int = 4,  # Backward compatibility (mapped to n_supervision_steps)
+        n_supervision_steps: int = 4,  # K
+        n_deep_loops: int = 2,         # T
+        n_latent_loops: int = 2,       # N
         discrete_action: bool = False,
         num_discrete_actions: int = 5
     ):
@@ -90,7 +93,10 @@ class RecurrentActorCritic(nn.Module):
             action_dim: 액션 차원 (연속 액션: left_speed, right_speed = 2)
             latent_dim: 잠재 상태 차원
             hidden_dim: 히든 레이어 차원
-            n_cycles: 재귀 추론 반복 횟수
+            n_cycles: 기존 호환성을 위한 인자 (n_supervision_steps로 사용됨)
+            n_supervision_steps: Deep Supervision 반복 횟수 (K)
+            n_deep_loops: Deep Recursion 반복 횟수 (T)
+            n_latent_loops: Latent Recursion 반복 횟수 (N)
             discrete_action: 이산 액션 공간 사용 여부
             num_discrete_actions: 이산 액션 개수
         """
@@ -98,7 +104,9 @@ class RecurrentActorCritic(nn.Module):
         
         self.state_dim = state_dim
         self.latent_dim = latent_dim
-        self.n_cycles = n_cycles
+        self.n_supervision_steps = n_supervision_steps if n_cycles == 4 else n_cycles  # 우선순위 조정
+        self.n_deep_loops = n_deep_loops
+        self.n_latent_loops = n_latent_loops
         self.discrete_action = discrete_action
         self.num_discrete_actions = num_discrete_actions
         
@@ -126,6 +134,52 @@ class RecurrentActorCritic(nn.Module):
         # Critic 헤드 (가치 네트워크)
         self.critic = nn.Linear(latent_dim, 1)
     
+    def latent_recursion(self, state_emb: torch.Tensor, latent: torch.Tensor, n_loops: int) -> torch.Tensor:
+        """
+        Latent Recursion (N loops)
+        Gradient flows through all steps.
+        """
+        for _ in range(n_loops):
+            latent = self.reasoning_block(state_emb, latent)
+        return latent
+
+    def deep_recursion(
+        self, 
+        state_emb: torch.Tensor, 
+        latent: torch.Tensor, 
+        n_deep: int, 
+        n_latent: int
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Deep Recursion (T loops)
+        TRM Style: T-1 loops with no_grad, 1 loop with grad.
+        """
+        # T-1 times with no_grad (improve state without gradient overhead)
+        if n_deep > 1:
+            with torch.no_grad():
+                for _ in range(n_deep - 1):
+                    latent = self.latent_recursion(state_emb, latent, n_latent)
+        
+        # Last time with grad (connect gradient for learning)
+        latent_grad = self.latent_recursion(state_emb, latent, n_latent)
+        
+        # Calculate outputs using the gradient-connected latent
+        value = self.critic(latent_grad)
+        
+        if self.discrete_action:
+            action_output = self.actor(latent_grad)
+        else:
+            action_mean = torch.tanh(self.actor_mean(latent_grad))
+            action_log_std = self.actor_log_std.expand_as(action_mean)
+            action_output = (action_mean, action_log_std)
+            
+        # Return:
+        # 1. next_latent (detached for next supervision step)
+        # 2. current_latent (with grad for current step loss if needed)
+        # 3. value (with grad)
+        # 4. action_output (with grad)
+        return latent_grad.detach(), latent_grad, value, action_output
+
     def init_carry(self, batch_size: int, device: torch.device) -> LatentCarry:
         """
         초기 잠재 상태 생성
@@ -140,60 +194,110 @@ class RecurrentActorCritic(nn.Module):
         latent = self.init_latent.unsqueeze(0).expand(batch_size, -1).to(device)
         return LatentCarry(latent=latent)
     
-    def forward(
+    def forward_with_deep_supervision(
         self,
         state: torch.Tensor,
         carry: Optional[LatentCarry] = None,
-        n_cycles: Optional[int] = None
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, LatentCarry]:
+        n_supervision_steps: Optional[int] = None,
+        return_intermediates: bool = True
+    ) -> Tuple[Dict, List[Dict]]:
         """
-        순전파 with TRM 스타일 재귀 추론 + HRM 근사 그래디언트
+        Deep Supervision을 포함한 forward (K loops)
         
         Args:
             state: 상태 텐서 [batch, state_dim]
             carry: 이전 잠재 상태 (None이면 초기화)
-            n_cycles: 재귀 추론 횟수 (None이면 self.n_cycles 사용)
+            n_supervision_steps: Deep Supervision 반복 횟수 (K)
+            return_intermediates: True면 중간 출력 리스트도 반환
         
         Returns:
-            이산 액션: (action_logits, None, value, new_carry)
-            연속 액션: (action_mean, action_log_std, value, new_carry)
+            final_output: 최종 출력 딕셔너리
+            intermediate_outputs: 각 cycle의 출력 리스트
         """
         batch_size = state.shape[0]
         device = state.device
         
-        if n_cycles is None:
-            n_cycles = self.n_cycles
+        if n_supervision_steps is None:
+            n_supervision_steps = self.n_supervision_steps
         
         # 상태 인코딩
         state_emb = self.encoder(state)
         
-        # 잠재 상태 초기화 또는 carry-over
+        # 잠재 상태 초기화 (carry에서 이어받기)
         if carry is None:
             latent = self.init_latent.unsqueeze(0).expand(batch_size, -1).clone()
         else:
             latent = carry.latent
         
-        # HRM 스타일 근사 그래디언트: 내부 반복은 no_grad
-        if n_cycles > 1:
-            with torch.no_grad():
-                for _ in range(n_cycles - 1):
-                    latent = self.reasoning_block(state_emb, latent)
+        intermediate_outputs = []
         
-        # 마지막 단계만 gradient 계산
-        latent = self.reasoning_block(state_emb, latent.detach())
+        # Supervision Loop (K times)
+        for k in range(n_supervision_steps):
+            # Deep Recursion (T times) & Latent Recursion (N times)
+            # Returns detached latent for next step, and grad-connected outputs for current step
+            next_latent, latent_grad, value, action_output = self.deep_recursion(
+                state_emb, latent, self.n_deep_loops, self.n_latent_loops
+            )
+            
+            intermediate_outputs.append({
+                'latent': latent_grad,
+                'value': value,
+                'action': action_output,
+                'step': k
+            })
+            
+            # Update latent for next supervision step (detached)
+            latent = next_latent
         
-        # Actor/Critic 출력
-        value = self.critic(latent)
-        new_carry = LatentCarry(latent=latent.detach())
+        # 최종 출력 (마지막 supervision step)
+        final_output = {
+            'latent': intermediate_outputs[-1]['latent'],
+            'value': intermediate_outputs[-1]['value'],
+            'action': intermediate_outputs[-1]['action'],
+            'new_carry': LatentCarry(latent=latent)  # Detached latent for carry-over
+        }
+        
+        if return_intermediates:
+            return final_output, intermediate_outputs
+        else:
+            return final_output, []
+
+    def forward(
+        self,
+        state: torch.Tensor,
+        carry: Optional[LatentCarry] = None,
+        n_cycles: Optional[int] = None  # Ignored in this new logic (K is for training only)
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, LatentCarry]:
+        """
+        순전파 wrapper (Inference Mode)
+        Performs ONE pass of Deep Recursion (T loops) x Latent Recursion (N loops).
+        Deep Supervision Loop (K) is NOT performed here.
+        """
+        batch_size = state.shape[0]
+        
+        # 상태 인코딩
+        state_emb = self.encoder(state)
+        
+        # 잠재 상태 초기화 or Carry
+        if carry is None:
+            latent = self.init_latent.unsqueeze(0).expand(batch_size, -1).clone()
+        else:
+            latent = carry.latent
+            
+        # Deep Recursion (T times) & Latent Recursion (N times) - One Pass
+        next_latent, latent_grad, value, action_output = self.deep_recursion(
+            state_emb, latent, self.n_deep_loops, self.n_latent_loops
+        )
+        
+        # New carry uses detached latent
+        new_carry = LatentCarry(latent=next_latent)
         
         if self.discrete_action:
-            action_logits = self.actor(latent)
-            return action_logits, None, value, new_carry
+            return action_output, None, value, new_carry
         else:
-            action_mean = torch.tanh(self.actor_mean(latent))
-            action_log_std = self.actor_log_std.expand_as(action_mean)
+            action_mean, action_log_std = action_output
             return action_mean, action_log_std, value, new_carry
-    
+
     def get_action(
         self,
         state: torch.Tensor,
@@ -203,18 +307,6 @@ class RecurrentActorCritic(nn.Module):
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, LatentCarry]:
         """
         액션 샘플링 with 재귀 추론
-        
-        Args:
-            state: 상태 텐서
-            carry: 이전 잠재 상태
-            deterministic: True면 최대 확률 액션 사용
-            n_cycles: 재귀 추론 횟수
-        
-        Returns:
-            action: 샘플링된 액션
-            log_prob: 로그 확률
-            value: 상태 가치
-            new_carry: 새 잠재 상태
         """
         if self.discrete_action:
             action_logits, _, value, new_carry = self.forward(state, carry, n_cycles)
@@ -256,17 +348,6 @@ class RecurrentActorCritic(nn.Module):
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         주어진 상태와 액션에 대한 평가
-        
-        Args:
-            state: 상태 텐서
-            action: 액션 텐서
-            latent: 저장된 잠재 상태 (재현을 위해)
-            n_cycles: 재귀 추론 횟수
-        
-        Returns:
-            log_prob: 로그 확률
-            value: 상태 가치
-            entropy: 엔트로피
         """
         carry = LatentCarry(latent=latent) if latent is not None else None
         
@@ -296,6 +377,51 @@ class RecurrentActorCritic(nn.Module):
             entropy = dist.entropy().sum(dim=-1, keepdim=True)
             
             return log_prob, value, entropy
+    
+    def evaluate_with_deep_supervision(
+        self,
+        state: torch.Tensor,
+        action: torch.Tensor,
+        latent: Optional[torch.Tensor] = None,
+        n_cycles: Optional[int] = None
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, List[Dict]]:
+        """
+        Deep Supervision을 포함한 평가
+        """
+        carry = LatentCarry(latent=latent) if latent is not None else None
+        
+        # Deep Supervision forward (n_cycles -> n_supervision_steps)
+        final_output, intermediate_outputs = self.forward_with_deep_supervision(
+            state, carry, n_supervision_steps=n_cycles, return_intermediates=True
+        )
+        
+        # 최종 출력에서 log_prob와 entropy 계산
+        if self.discrete_action:
+            action_logits = final_output['action']
+            dist = torch.distributions.Categorical(logits=action_logits)
+            
+            if action.dtype != torch.long:
+                action = action.long()
+            
+            log_prob = dist.log_prob(action.squeeze(-1)).unsqueeze(-1)
+            entropy = dist.entropy().unsqueeze(-1)
+            value = final_output['value']
+        else:
+            action_mean, action_log_std = final_output['action']
+            value = final_output['value']
+            
+            std = torch.exp(action_log_std)
+            dist = torch.distributions.Normal(action_mean, std)
+            
+            # 액션을 역변환 (tanh)
+            action_inv = torch.atanh(torch.clamp(action, -0.999, 0.999))
+            
+            log_prob = dist.log_prob(action_inv).sum(dim=-1, keepdim=True)
+            log_prob -= torch.log(1 - torch.tanh(action_inv).pow(2) + 1e-6).sum(dim=-1, keepdim=True)
+            
+            entropy = dist.entropy().sum(dim=-1, keepdim=True)
+        
+        return log_prob, value, entropy, intermediate_outputs
 
 
 class ActorCritic(nn.Module):
@@ -469,7 +595,10 @@ class PPOAgent:
         action_dim: int = 2,
         latent_dim: int = 256,
         hidden_dim: int = 256,
-        n_cycles: int = 4,
+        n_cycles: int = 4,  # K (Backward Compatibility)
+        n_supervision_steps: int = 4,  # K
+        n_deep_loops: int = 2,         # T
+        n_latent_loops: int = 2,       # N
         carry_latent: bool = True,
         lr_actor: float = 3e-4,
         lr_critic: float = 3e-4,
@@ -485,7 +614,9 @@ class PPOAgent:
         use_recurrent: bool = True,
         use_monte_carlo: bool = False,
         total_steps: int = 1000000,
-        lr_schedule: str = 'cosine'  # 'cosine', 'linear', 'none'
+        lr_schedule: str = 'cosine',  # 'cosine', 'linear', 'none'
+        deep_supervision: bool = True,
+        deep_supervision_weights: Optional[List[float]] = None  # 각 cycle 가중치
     ):
         """
         Args:
@@ -493,7 +624,10 @@ class PPOAgent:
             action_dim: 액션 차원
             latent_dim: 잠재 상태 차원
             hidden_dim: 히든 레이어 차원
-            n_cycles: 재귀 추론 반복 횟수
+            n_cycles: 기존 호환성 (n_supervision_steps로 사용)
+            n_supervision_steps: Deep Supervision 반복 횟수 (K)
+            n_deep_loops: Deep Recursion 반복 횟수 (T)
+            n_latent_loops: Latent Recursion 반복 횟수 (N)
             carry_latent: 에피소드 내 잠재 상태 유지 여부
             lr_actor: Actor 학습률
             lr_critic: Critic 학습률
@@ -516,7 +650,13 @@ class PPOAgent:
         self.value_coef = value_coef
         self.entropy_coef = entropy_coef
         self.max_grad_norm = max_grad_norm
-        self.n_cycles = n_cycles
+        
+        # 파라미터 매핑
+        self.n_supervision_steps = n_supervision_steps if n_cycles == 4 else n_cycles
+        self.n_deep_loops = n_deep_loops
+        self.n_latent_loops = n_latent_loops
+        self.n_cycles = self.n_supervision_steps  # 내부 로직 호환용
+        
         self.carry_latent = carry_latent
         self.use_recurrent = use_recurrent
         self.latent_dim = latent_dim
@@ -525,6 +665,8 @@ class PPOAgent:
         self.lr_schedule = lr_schedule
         self.initial_lr_actor = lr_actor
         self.initial_lr_critic = lr_critic
+        self.deep_supervision = deep_supervision
+        self.deep_supervision_weights = deep_supervision_weights
         
         # Actor-Critic 네트워크 (TRM 스타일 또는 기존)
         if use_recurrent:
@@ -533,7 +675,11 @@ class PPOAgent:
                 action_dim=action_dim,
                 latent_dim=latent_dim,
                 hidden_dim=hidden_dim,
-                n_cycles=n_cycles,
+                n_cycles=n_cycles, # Ignored inside RecurrentActorCritic __init__ if new params passed? 
+                # No, we need to pass the correct params.
+                n_supervision_steps=self.n_supervision_steps,
+                n_deep_loops=self.n_deep_loops,
+                n_latent_loops=self.n_latent_loops,
                 discrete_action=discrete_action,
                 num_discrete_actions=num_discrete_actions
             ).to(device)
@@ -628,7 +774,8 @@ class PPOAgent:
     def get_action_with_carry(
         self,
         state: torch.Tensor,
-        deterministic: bool = False
+        deterministic: bool = False,
+        use_deep_supervision: bool = False
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Optional[np.ndarray]]:
         """
         잠재 상태 carry-over와 함께 액션 샘플링
@@ -636,6 +783,8 @@ class PPOAgent:
         Args:
             state: 상태 텐서
             deterministic: True면 최대 확률 액션 사용
+            use_deep_supervision: True면 추론 시에도 Deep Supervision 사용 (K번 반복)
+                                  False면 한 번만 생각 (빠른 추론, 기본값)
         
         Returns:
             action: 샘플링된 액션
@@ -644,12 +793,46 @@ class PPOAgent:
             latent_np: 잠재 상태 (numpy, 버퍼 저장용)
         """
         if self.use_recurrent:
-            action, log_prob, value, new_carry = self.actor_critic.get_action(
-                state, 
-                carry=self.current_carry if self.carry_latent else None,
-                deterministic=deterministic,
-                n_cycles=self.n_cycles
-            )
+            if use_deep_supervision:
+                # Deep Supervision 사용: K번 반복하며 최종 결과 사용
+                carry = self.current_carry if self.carry_latent else None
+                final_output, _ = self.actor_critic.forward_with_deep_supervision(
+                    state, carry, n_supervision_steps=self.n_supervision_steps, return_intermediates=False
+                )
+                
+                value = final_output['value']
+                action_output = final_output['action']
+                new_carry = final_output['new_carry']
+                
+                # 액션 샘플링
+                if self.actor_critic.discrete_action:
+                    action_logits = action_output
+                    dist = torch.distributions.Categorical(logits=action_logits)
+                    if deterministic:
+                        action = dist.probs.argmax(dim=-1)
+                    else:
+                        action = dist.sample()
+                    log_prob = dist.log_prob(action).unsqueeze(-1)
+                else:
+                    action_mean, action_log_std = action_output
+                    if deterministic:
+                        action = action_mean
+                        log_prob = None
+                    else:
+                        std = torch.exp(action_log_std)
+                        dist = torch.distributions.Normal(action_mean, std)
+                        action = dist.sample()
+                        log_prob = dist.log_prob(action).sum(dim=-1, keepdim=True)
+                        action = torch.tanh(action)
+                        log_prob -= torch.log(1 - action.pow(2) + 1e-6).sum(dim=-1, keepdim=True)
+            else:
+                # 기본: 한 번만 생각 (빠른 추론)
+                action, log_prob, value, new_carry = self.actor_critic.get_action(
+                    state, 
+                    carry=self.current_carry if self.carry_latent else None,
+                    deterministic=deterministic,
+                    n_cycles=None  # K 루프 사용 안 함
+                )
             
             # Carry-over 업데이트
             if self.carry_latent:
@@ -739,17 +922,87 @@ class PPOAgent:
         
         return advantages, returns
     
-    def update(self, epochs: int = 10, progress: float = 0.0, return_gradients: bool = False) -> Dict[str, float]:
+    def compute_deep_supervision_loss(
+        self,
+        intermediate_outputs: List[Dict],
+        actual_returns: torch.Tensor,
+        actual_advantages: torch.Tensor,
+        actual_actions: torch.Tensor,
+        old_log_probs: torch.Tensor,
+        weights: Optional[List[float]] = None
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        PPO 업데이트 with TRM 스타일 재귀 추론
+        각 reasoning cycle에 대한 Deep Supervision 손실 계산
+        
+        Args:
+            intermediate_outputs: 각 cycle의 출력 리스트
+            actual_returns: 실제 리턴 [batch]
+            actual_advantages: 실제 어드밴티지 [batch]
+            actual_actions: 실제 액션 [batch]
+            old_log_probs: 이전 로그 확률 [batch]
+            weights: 각 cycle의 가중치 (None이면 자동 계산)
+        
+        Returns:
+            total_policy_loss, total_value_loss
+        """
+        n_cycles = len(intermediate_outputs)
+        
+        if weights is None:
+            # 후기 cycle에 더 높은 가중치 (선형 증가)
+            weights = [(i + 1) / n_cycles for i in range(n_cycles)]
+            weights = [w / sum(weights) for w in weights]  # 정규화
+        
+        total_policy_loss = 0
+        total_value_loss = 0
+        
+        for i, output in enumerate(intermediate_outputs):
+            w = weights[i]
+            
+            # Value loss (Critic supervision)
+            value_pred = output['value'].squeeze(-1)
+            # Value loss: MSE
+            value_loss_i = F.mse_loss(value_pred, actual_returns)
+            
+            # Policy loss (액션 확률)
+            if self.actor_critic.discrete_action:
+                action_logits = output['action']
+                dist = torch.distributions.Categorical(logits=action_logits)
+                new_log_probs = dist.log_prob(actual_actions.squeeze(-1))
+            else:
+                action_mean, action_log_std = output['action']
+                std = torch.exp(action_log_std)
+                dist = torch.distributions.Normal(action_mean, std)
+                
+                # 액션을 역변환 (tanh)
+                action_inv = torch.atanh(torch.clamp(actual_actions, -0.999, 0.999))
+                
+                log_prob = dist.log_prob(action_inv).sum(dim=-1, keepdim=True)
+                log_prob -= torch.log(1 - torch.tanh(action_inv).pow(2) + 1e-6).sum(dim=-1, keepdim=True)
+                new_log_probs = log_prob
+            
+            ratio = torch.exp(new_log_probs - old_log_probs)
+            surr1 = ratio * actual_advantages
+            surr2 = torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon) * actual_advantages
+            policy_loss_i = -torch.min(surr1, surr2).mean()
+            
+            # 가중합
+            total_policy_loss += w * policy_loss_i
+            total_value_loss += w * value_loss_i
+        
+        return total_policy_loss, total_value_loss
+    
+    def update(self, epochs: int = 10, progress: float = 0.0, return_gradients: bool = False, supervision_step_only: bool = False) -> Dict[str, float]:
+        """
+        PPO 업데이트 with TRM 스타일 Step-wise Optimization
         
         Args:
             epochs: 업데이트 에폭 수
-            progress: 학습 진행률 [0, 1] (사용 안 함, 호환성 유지)
+            progress: 학습 진행률 [0, 1]
             return_gradients: True면 그래디언트만 계산하고 반환 (A3C용)
+            supervision_step_only: True면 단일 Supervision Step만 수행 (A3C Step-wise 동기화용)
         
         Returns:
-            loss_info: 손실 정보 딕셔너리 (return_gradients=True면 gradients도 포함)
+            loss_info: 손실 정보 딕셔너리
         """
         if len(self.buffer['states']) == 0:
             return {}
@@ -762,22 +1015,14 @@ class PPOAgent:
         rewards = np.array(self.buffer['rewards'])
         dones = np.array(self.buffer['dones'])
         
-        # 잠재 상태 텐서 (RecurrentActorCritic용)
-        latents = None
-        if self.use_recurrent and len(self.buffer['latents']) > 0:
-            latents = torch.FloatTensor(np.array(self.buffer['latents'])).to(self.device)
-            # 배치 차원 조정 (squeeze if needed)
-            if latents.dim() == 3 and latents.shape[1] == 1:
-                latents = latents.squeeze(1)
+        batch_size = states.shape[0]
         
         # 리턴 및 어드밴티지 계산
         if self.use_monte_carlo:
-            # Monte Carlo: 실제 에피소드 리턴 사용 (부트스트래핑 없음)
             advantages, returns = self.compute_mc_returns(
                 rewards, dones, old_values.cpu().numpy()
             )
         else:
-            # GAE: TD 기반 어드밴티지 추정
             next_value = 0
             advantages, returns = self.compute_gae(
                 rewards, old_values.cpu().numpy(), dones, next_value
@@ -786,103 +1031,139 @@ class PPOAgent:
         advantages = torch.FloatTensor(advantages).to(self.device)
         returns = torch.FloatTensor(returns).to(self.device)
         
-        # 정규화 전 어드밴티지 통계 저장
+        # 정규화
         adv_mean_before = advantages.mean().item()
         adv_std_before = advantages.std().item()
-        
-        # 정규화
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
         
         total_loss = 0
         total_policy_loss = 0
         total_value_loss = 0
         total_entropy = 0
-        total_ratio_mean = 0
-        total_ratio_std = 0
         
-        # 그래디언트 저장용 (return_gradients=True일 때)
+        # 그래디언트 저장용 (A3C용)
         gradients = None
-        
+
         # 여러 에폭 동안 업데이트
         for epoch in range(epochs):
-            # 현재 정책으로 평가
-            if self.use_recurrent:
-                log_probs, values, entropy = self.actor_critic.evaluate(
-                    states, actions, latent=latents, n_cycles=self.n_cycles
+            # supervision_step_only=True면 각 Step마다 latent 초기화
+            # False면 epoch 시작 시 한 번만 초기화
+            if not supervision_step_only:
+                # Latent 초기화 (y_init, z_init)
+                # 배치 전체에 대해 초기화
+                latent = self.actor_critic.init_latent.unsqueeze(0).expand(batch_size, -1).clone()
+            
+            # TRM Style: Step-wise Update (Loop K)
+            # supervision_step_only=True면 단일 Step만 수행 (A3C에서 각 Step마다 동기화하기 위해)
+            n_steps = 1 if supervision_step_only else self.n_supervision_steps
+            for step in range(n_steps):
+                # supervision_step_only=True면 각 Step마다 latent 초기화
+                if supervision_step_only:
+                    latent = self.actor_critic.init_latent.unsqueeze(0).expand(batch_size, -1).clone()
+                # 1. State Encoding (매 스텝 Encoder 업데이트를 위해 루프 내부 수행)
+                state_emb = self.actor_critic.encoder(states)
+                
+                # 2. Deep Recursion (One Step of M x N)
+                next_latent, latent_grad, value, action_output = self.actor_critic.deep_recursion(
+                    state_emb, latent, self.n_deep_loops, self.n_latent_loops
                 )
-            else:
-                log_probs, values, entropy = self.actor_critic.evaluate(states, actions)
+                
+                # 3. Loss Calculation
+                # Value Loss
+                value_pred = value.squeeze(-1)
+                value_loss = F.mse_loss(value_pred, returns)
+                
+                # Policy Loss & Entropy
+                if self.actor_critic.discrete_action:
+                    action_logits = action_output
+                    dist = torch.distributions.Categorical(logits=action_logits)
+                    new_log_probs = dist.log_prob(actions.squeeze(-1))
+                    entropy = dist.entropy().mean()
+                else:
+                    action_mean, action_log_std = action_output
+                    std = torch.exp(action_log_std)
+                    dist = torch.distributions.Normal(action_mean, std)
+                    action_inv = torch.atanh(torch.clamp(actions, -0.999, 0.999))
+                    log_prob = dist.log_prob(action_inv).sum(dim=-1, keepdim=True)
+                    log_prob -= torch.log(1 - torch.tanh(action_inv).pow(2) + 1e-6).sum(dim=-1, keepdim=True)
+                    new_log_probs = log_prob
+                    entropy = dist.entropy().sum(dim=-1, keepdim=True).mean()
+                
+                # Ratio & Surrogate Loss
+                ratio = torch.exp(new_log_probs - old_log_probs)
+                surr1 = ratio * advantages
+                surr2 = torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon) * advantages
+                policy_loss = -torch.min(surr1, surr2).mean()
+                
+                # Total Loss for this step
+                loss = policy_loss + self.value_coef * value_loss - self.entropy_coef * entropy
+                
+                # 4. Backward & Update
+                if return_gradients:
+                    # A3C 스타일: 그래디언트만 계산하고 누적
+                    # 각 Step마다 그래디언트를 누적 (메인 모델로 전송용)
+                    self.optimizer.zero_grad()
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(self.actor_critic.parameters(), self.max_grad_norm)
+                    
+                    # 그래디언트 수집
+                    if gradients is None:
+                        gradients = {}
+                        for name, param in self.actor_critic.named_parameters():
+                            if param.grad is not None:
+                                gradients[name] = param.grad.clone()
+                    else:
+                        # 누적 (여러 Step의 그래디언트 합산)
+                        for name, param in self.actor_critic.named_parameters():
+                            if param.grad is not None:
+                                if name in gradients:
+                                    gradients[name] += param.grad.clone()
+                                else:
+                                    gradients[name] = param.grad.clone()
+                else:
+                    # 일반 PPO: 즉시 업데이트
+                    self.optimizer.zero_grad()
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(self.actor_critic.parameters(), self.max_grad_norm)
+                    self.optimizer.step()
+                
+                # 통계 누적
+                total_loss += loss.item()
+                total_policy_loss += policy_loss.item()
+                total_value_loss += value_loss.item()
+                total_entropy += entropy.item()
+                
+                # 5. Pass detached latent to next step
+                latent = next_latent
             
-            # 정책 비율
-            ratio = torch.exp(log_probs - old_log_probs)
-            
-            # 비율 통계 (디버깅용)
-            total_ratio_mean += ratio.mean().item()
-            total_ratio_std += ratio.std().item()
-            
-            # PPO 클리핑 손실
-            surr1 = ratio * advantages
-            surr2 = torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon) * advantages
-            policy_loss = -torch.min(surr1, surr2).mean()
-            
-            # 가치 함수 손실 (클리핑 적용하여 안정화)
-            # Value loss 클리핑: 큰 오차를 제한하여 불안정성 방지
-            value_pred = values.squeeze(-1)
-            value_loss_clipped = torch.clamp(
-                (value_pred - returns).pow(2),
-                max=100.0  # 최대 손실 제한
-            ).mean()
-            value_loss = value_loss_clipped
-            
-            # 엔트로피 손실 (표준 PPO: 고정 계수 사용)
-            entropy_loss = -entropy.mean()
-            
-            # 총 손실
-            loss = policy_loss + self.value_coef * value_loss + self.entropy_coef * entropy_loss
-            
-            # 역전파
-            self.optimizer.zero_grad()
-            loss.backward()
-            # 그래디언트 클리핑 강화 (불안정성 방지)
-            torch.nn.utils.clip_grad_norm_(self.actor_critic.parameters(), self.max_grad_norm * 0.5)  # 더 강한 클리핑
-            
-            # 그래디언트 수집 (return_gradients=True일 때)
-            if return_gradients:
-                if gradients is None:
-                    gradients = {}
-                for name, param in self.actor_critic.named_parameters():
-                    if param.grad is not None:
-                        if name not in gradients:
-                            gradients[name] = param.grad.clone()
-                        else:
-                            gradients[name] += param.grad.clone()
-            else:
-                # 일반 모드: 가중치 업데이트
-                self.optimizer.step()
-                # 학습률 스케줄링 (매 에폭마다)
-                if self.scheduler is not None:
-                    self.scheduler.step()
-            
-            total_loss += loss.item()
-            total_policy_loss += policy_loss.item()
-            total_value_loss += value_loss.item()
-            total_entropy += entropy.mean().item()
+            # 에폭마다 스케줄러 스텝 (선택 사항, TRM 코드엔 없음)
+            if self.scheduler is not None and not return_gradients:
+                self.scheduler.step()
         
         # 버퍼 초기화
         self.reset_buffer()
         
+        # 평균 손실 계산
+        if supervision_step_only:
+            # 단일 Step만 수행했으므로 Step 수는 epochs
+            total_steps = epochs
+        else:
+            # 총 스텝 수 = epochs * K
+            total_steps = epochs * self.n_supervision_steps
+        
+        if total_steps == 0:
+            return {}
+        
         result = {
-            'loss': total_loss / epochs,
-            'policy_loss': total_policy_loss / epochs,
-            'value_loss': total_value_loss / epochs,
-            'entropy': total_entropy / epochs,
+            'loss': total_loss / total_steps,
+            'policy_loss': total_policy_loss / total_steps,
+            'value_loss': total_value_loss / total_steps,
+            'entropy': total_entropy / total_steps,
             'adv_mean': adv_mean_before,
-            'adv_std': adv_std_before,
-            'ratio_mean': total_ratio_mean / epochs,
-            'ratio_std': total_ratio_std / epochs
+            'adv_std': adv_std_before
         }
         
-        # 그래디언트 반환 (있는 경우)
+        # A3C: 그래디언트 반환
         if return_gradients and gradients is not None:
             result['gradients'] = gradients
         
@@ -895,7 +1176,10 @@ class PPOAgent:
             'optimizer': self.optimizer.state_dict(),
             'config': {
                 'use_recurrent': self.use_recurrent,
-                'n_cycles': self.n_cycles,
+                'n_cycles': self.n_cycles, # Backward compatibility
+                'n_supervision_steps': self.n_supervision_steps,
+                'n_deep_loops': self.n_deep_loops,
+                'n_latent_loops': self.n_latent_loops,
                 'carry_latent': self.carry_latent,
                 'latent_dim': self.latent_dim
             }
@@ -935,10 +1219,22 @@ class PPOAgent:
                 config = checkpoint['config']
                 self.use_recurrent = config.get('use_recurrent', True)
                 self.n_cycles = config.get('n_cycles', 4)
+                # 새로운 파라미터 로드 (없으면 기본값)
+                self.n_supervision_steps = config.get('n_supervision_steps', self.n_cycles)
+                self.n_deep_loops = config.get('n_deep_loops', 2)
+                self.n_latent_loops = config.get('n_latent_loops', 2)
+                
                 self.carry_latent = config.get('carry_latent', True)
+                
+                # 객체 속성 업데이트
+                if self.use_recurrent and hasattr(self.actor_critic, 'n_supervision_steps'):
+                    self.actor_critic.n_supervision_steps = self.n_supervision_steps
+                    self.actor_critic.n_deep_loops = self.n_deep_loops
+                    self.actor_critic.n_latent_loops = self.n_latent_loops
             
             print(f"Model loaded from {path}")
             print(f"Device: {self.device}")
+            print(f"Config: K={self.n_supervision_steps}, T={self.n_deep_loops}, N={self.n_latent_loops}")
         
         except Exception as e:
             print(f"❌ 모델 로드 실패: {e}")
@@ -954,12 +1250,15 @@ if __name__ == "__main__":
     
     # TRM 스타일 RecurrentActorCritic 테스트
     print("\n[1] RecurrentActorCritic (TRM-style) 테스트")
+    print("설정: K=4 (Supervision), T=2 (Deep), N=2 (Latent)")
     agent = PPOAgent(
         state_dim=256, 
         action_dim=2,
         latent_dim=256,
         hidden_dim=256,
-        n_cycles=4,
+        n_supervision_steps=4, # K
+        n_deep_loops=2,        # T
+        n_latent_loops=2,      # N
         carry_latent=True,
         use_recurrent=True
     )
@@ -969,15 +1268,42 @@ if __name__ == "__main__":
     state_tensor = torch.FloatTensor(state).unsqueeze(0).to(agent.device)
     
     # 첫 번째 액션 (초기 잠재 상태)
+    # 추론 시에는 마지막 supervision output만 사용됨
     action, log_prob, value, latent = agent.get_action_with_carry(state_tensor)
     print(f"Step 1 - Action: {action.shape}, Log Prob: {log_prob.shape if log_prob is not None else None}, Value: {value.shape}")
     print(f"         Latent: {latent.shape if latent is not None else None}")
     
+    # Deep Supervision Forward 테스트 (Step-wise Update 구조 확인)
+    print("\nDeep Supervision Forward 테스트:")
+    outputs, intermediates = agent.actor_critic.forward_with_deep_supervision(
+        state_tensor, n_supervision_steps=4, return_intermediates=True
+    )
+    print(f"Intermediates count: {len(intermediates)} (Expected: 4)")
+    for i, out in enumerate(intermediates):
+        print(f"  Step {i}: Value={out['value'].item():.4f}, Latent norm={out['latent'].norm().item():.4f}")
+
+    # Update 메서드 테스트 (Mock Data)
+    print("\nUpdate 메서드 테스트:")
+    # 가짜 데이터 채우기
+    for _ in range(10):
+        agent.store_transition(
+            state=np.random.rand(256).astype(np.float32),
+            action=np.random.rand(2).astype(np.float32), # continuous
+            reward=1.0,
+            done=False,
+            log_prob=0.0,
+            value=0.0,
+            latent=np.random.rand(256).astype(np.float32)
+        )
+    
+    loss_info = agent.update(epochs=2)
+    print(f"Update completed. Loss info: {loss_info}")
+
     # 두 번째 액션 (잠재 상태 carry-over)
     state2 = np.random.rand(256).astype(np.float32)
     state_tensor2 = torch.FloatTensor(state2).unsqueeze(0).to(agent.device)
     action2, log_prob2, value2, latent2 = agent.get_action_with_carry(state_tensor2)
-    print(f"Step 2 - Action: {action2.shape}, Log Prob: {log_prob2.shape if log_prob2 is not None else None}, Value: {value2.shape}")
+    print(f"\nStep 2 - Action: {action2.shape}, Log Prob: {log_prob2.shape if log_prob2 is not None else None}, Value: {value2.shape}")
     print(f"         Latent carry-over 활성화: {agent.carry_latent}")
     
     # 에피소드 리셋

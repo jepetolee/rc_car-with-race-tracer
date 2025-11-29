@@ -114,7 +114,8 @@ class ImitationRLTrainer:
             entropy_coef=entropy_coef,
             max_grad_norm=max_grad_norm,
             device=device,
-            use_recurrent=False  # 간단하게
+            use_recurrent=True,  # Deep Supervision을 위해 Recurrent 활성화
+            deep_supervision=True
         )
         
         # 사전 학습된 모델 로드
@@ -145,7 +146,7 @@ class ImitationRLTrainer:
     
     def train_step(self, states: np.ndarray, expert_actions: np.ndarray):
         """
-        단일 학습 스텝
+        단일 학습 스텝 (TRM 스타일 Step-wise Update)
         
         Args:
             states: 상태 배열 [batch_size, 256]
@@ -154,7 +155,7 @@ class ImitationRLTrainer:
         states_tensor = torch.FloatTensor(states).to(self.device)
         expert_actions_tensor = torch.LongTensor(expert_actions).to(self.device)
         
-        # 모델이 액션 선택
+        # 초기 액션 선택 (리워드 계산용)
         actions, log_probs, values = self.agent.actor_critic.get_action(states_tensor)
         actions_np = actions.cpu().numpy().flatten()
         
@@ -163,55 +164,127 @@ class ImitationRLTrainer:
             self.compute_imitation_reward(pred, expert)
             for pred, expert in zip(actions_np, expert_actions)
         ])
-        
-        # 정규화된 리워드
         rewards_tensor = torch.FloatTensor(rewards).to(self.device)
         
-        # Advantage 계산 (간단하게 리워드 사용)
+        # Advantage 계산
         advantages = rewards_tensor - values.squeeze()
-        
-        # PPO 업데이트
         old_log_probs = log_probs.detach()
         
-        # 현재 정책으로 재평가
-        new_log_probs, new_values, entropy = self.agent.actor_critic.evaluate(
-            states_tensor, expert_actions_tensor.unsqueeze(-1)
-        )
+        # 통계 누적용
+        total_loss_sum = 0
+        total_actor_loss_sum = 0
+        total_value_loss_sum = 0
+        total_entropy_sum = 0
         
-        # PPO 손실 계산
-        ratio = torch.exp(new_log_probs - old_log_probs)
-        surr1 = ratio * advantages
-        surr2 = torch.clamp(ratio, 1.0 - self.agent.clip_epsilon, 1.0 + self.agent.clip_epsilon) * advantages
-        actor_loss = -torch.min(surr1, surr2).mean()
+        # TRM 스타일: Step-wise Update (K번 반복)
+        if self.agent.use_recurrent and self.agent.deep_supervision:
+            batch_size = states_tensor.shape[0]
+            # Latent 초기화
+            latent = self.agent.actor_critic.init_latent.unsqueeze(0).expand(batch_size, -1).clone()
+            
+            # K번의 Supervision Loop
+            for step in range(self.agent.n_supervision_steps):
+                # 1. State Encoding
+                state_emb = self.agent.actor_critic.encoder(states_tensor)
+                
+                # 2. Deep Recursion (One Step of M x N)
+                next_latent, latent_grad, value, action_output = self.agent.actor_critic.deep_recursion(
+                    state_emb, latent, self.agent.n_deep_loops, self.agent.n_latent_loops
+                )
+                
+                # 3. Loss Calculation for THIS step
+                value_pred = value.squeeze(-1)
+                value_loss = F.mse_loss(value_pred, rewards_tensor)
+                
+                # Policy Loss & Entropy
+                if self.agent.actor_critic.discrete_action:
+                    action_logits = action_output
+                    dist = torch.distributions.Categorical(logits=action_logits)
+                    new_log_probs = dist.log_prob(expert_actions_tensor.squeeze(-1))
+                    entropy = dist.entropy().mean()
+                else:
+                    action_mean, action_log_std = action_output
+                    std = torch.exp(action_log_std)
+                    dist = torch.distributions.Normal(action_mean, std)
+                    action_inv = torch.atanh(torch.clamp(expert_actions_tensor, -0.999, 0.999))
+                    log_prob = dist.log_prob(action_inv).sum(dim=-1, keepdim=True)
+                    log_prob -= torch.log(1 - torch.tanh(action_inv).pow(2) + 1e-6).sum(dim=-1, keepdim=True)
+                    new_log_probs = log_prob
+                    entropy = dist.entropy().sum(dim=-1, keepdim=True).mean()
+                
+                # Ratio & Surrogate Loss
+                ratio = torch.exp(new_log_probs - old_log_probs)
+                surr1 = ratio * advantages
+                surr2 = torch.clamp(ratio, 1 - self.agent.clip_epsilon, 1 + self.agent.clip_epsilon) * advantages
+                actor_loss = -torch.min(surr1, surr2).mean()
+                
+                # Total Loss for this step
+                loss = actor_loss + self.agent.value_coef * value_loss - self.agent.entropy_coef * entropy
+                
+                # 4. Backward & Update (IMMEDIATELY - TRM Style)
+                self.agent.optimizer.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.agent.actor_critic.parameters(), self.agent.max_grad_norm)
+                self.agent.optimizer.step()
+                
+                # 통계 누적
+                total_loss_sum += loss.item()
+                total_actor_loss_sum += actor_loss.item()
+                total_value_loss_sum += value_loss.item()
+                total_entropy_sum += entropy.item()
+                
+                # 5. Pass detached latent to next step
+                latent = next_latent
+        else:
+            # 기존 방식 (Non-recurrent 또는 Deep Supervision 비활성화)
+            new_log_probs, new_values, entropy = self.agent.actor_critic.evaluate(
+                states_tensor, expert_actions_tensor.unsqueeze(-1)
+            )
+            
+            # PPO 손실 계산
+            ratio = torch.exp(new_log_probs - old_log_probs)
+            surr1 = ratio * advantages
+            surr2 = torch.clamp(ratio, 1.0 - self.agent.clip_epsilon, 1.0 + self.agent.clip_epsilon) * advantages
+            actor_loss = -torch.min(surr1, surr2).mean()
+            
+            # Value loss
+            value_loss = F.mse_loss(new_values.squeeze(), rewards_tensor)
+            
+            # Entropy
+            entropy_loss = -entropy.mean()
+            
+            # 총 손실
+            total_loss = (
+                actor_loss +
+                self.agent.value_coef * value_loss +
+                self.agent.entropy_coef * entropy_loss
+            )
+            
+            # 역전파
+            self.agent.optimizer.zero_grad()
+            total_loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.agent.actor_critic.parameters(), self.agent.max_grad_norm)
+            self.agent.optimizer.step()
+            
+            total_loss_sum = total_loss.item()
+            total_actor_loss_sum = actor_loss.item()
+            total_value_loss_sum = value_loss.item()
+            total_entropy_sum = entropy.mean().item()
         
-        # Value loss
-        value_loss = F.mse_loss(new_values.squeeze(), rewards_tensor)
+        # 통계 (평균 계산)
+        if self.agent.use_recurrent and self.agent.deep_supervision:
+            n_steps = self.agent.n_supervision_steps
+        else:
+            n_steps = 1
         
-        # Entropy
-        entropy_loss = -entropy.mean()
-        
-        # 총 손실
-        total_loss = (
-            actor_loss +
-            self.agent.value_coef * value_loss +
-            self.agent.entropy_coef * entropy_loss
-        )
-        
-        # 역전파
-        self.agent.optimizer.zero_grad()
-        total_loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.agent.actor_critic.parameters(), self.agent.max_grad_norm)
-        self.agent.optimizer.step()
-        
-        # 통계
         match_rate = np.mean(actions_np == expert_actions)
         avg_reward = np.mean(rewards)
         
         return {
-            'total_loss': total_loss.item(),
-            'actor_loss': actor_loss.item(),
-            'value_loss': value_loss.item(),
-            'entropy': entropy.mean().item(),
+            'total_loss': total_loss_sum / n_steps,
+            'actor_loss': total_actor_loss_sum / n_steps,
+            'value_loss': total_value_loss_sum / n_steps,
+            'entropy': total_entropy_sum / n_steps,
             'match_rate': match_rate,
             'avg_reward': avg_reward
         }

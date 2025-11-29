@@ -484,9 +484,14 @@ def inference():
         )
         agent.load(model_path)
         
-        # 추론
+        # 추론 (recurrent 값 승계를 위해 get_action_with_carry 사용)
         state_tensor = torch.FloatTensor(state).unsqueeze(0)
-        action, log_prob, value = agent.actor_critic.get_action(state_tensor)
+        if hasattr(agent, 'use_recurrent') and agent.use_recurrent:
+            action, log_prob, value, _ = agent.get_action_with_carry(
+                state_tensor, deterministic=True
+            )
+        else:
+            action, log_prob, value = agent.actor_critic.get_action(state_tensor)
         
         return jsonify({
             'action': int(action.item()),
