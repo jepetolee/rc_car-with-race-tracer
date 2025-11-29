@@ -5,6 +5,7 @@ __author__ = 'will'
 
 import sys
 import os
+import time
 
 import numpy as np
 import cv2
@@ -21,6 +22,8 @@ class RC_Car_Interface():
     def __init__(self):
         self.left_wheel = 0
         self.right_wheel = 0
+        self.is_moving = False
+        self._qr_detector = cv2.QRCodeDetector()
         self.camera = Picamera2()
         
         # Configure camera for still capture with 320x320 resolution
@@ -34,10 +37,17 @@ class RC_Car_Interface():
         print('finish iteration')
 
     def set_right_speed(self, speed):
+        self.right_wheel = speed
+        self._update_motion_state()
         print('set right speed to ', speed)
     
     def set_left_speed(self, speed):
+        self.left_wheel = speed
+        self._update_motion_state()
         print('set left speed to ', speed)
+
+    def _update_motion_state(self):
+        self.is_moving = (abs(self.left_wheel) > 0 or abs(self.right_wheel) > 0)
         
     def get_image_from_camera(self):
         # Capture image using picamera2
@@ -56,7 +66,29 @@ class RC_Car_Interface():
         return img2
 
     def stop(self):     # robot stop
+        self.left_wheel = 0
+        self.right_wheel = 0
+        self.is_moving = False
         print('stop')
+
+    def check_and_stop_on_qr(self):
+        """
+        Capture a fresh frame, detect QR code, and stop the car if one is found while moving.
+        
+        Returns:
+            (detected: bool, data: str): True와 QR 데이터 문자열을 반환. 미검출 시 (False, "").
+        """
+        frame = self.camera.capture_array()
+        data, points, _ = self._qr_detector.detectAndDecode(frame)
+
+        if data and self.is_moving:
+            print(f'QR detected ({data}). Stopping car for 4 seconds.')
+            self.stop()
+            time.sleep(4)
+            print('Resume control after QR stop window.')
+            return True, data
+
+        return bool(data), data or ""
         
     def close(self):
         """Close camera (for cleanup)"""

@@ -8,6 +8,7 @@ import os
 import pickle
 import argparse
 import uuid
+import numpy as np
 from datetime import datetime
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
@@ -434,8 +435,10 @@ def train_supervised():
     
     요청:
     - file_path: 업로드된 데이터 파일 경로
+    - model_path: 사전 학습된 모델 경로 (선택, 없으면 랜덤 초기화)
     - epochs: 학습 에폭 수 (기본: 100)
     - batch_size: 배치 크기 (기본: 64)
+    - learning_rate: 학습률 (기본: 3e-4)
     
     응답:
     - status: success
@@ -444,11 +447,38 @@ def train_supervised():
     try:
         data = request.json
         file_path = data.get('file_path')
+        model_path = data.get('model_path')
         epochs = data.get('epochs', 100)
         batch_size = data.get('batch_size', 64)
+        learning_rate = data.get('learning_rate', 3e-4)
         
-        if not file_path or not os.path.exists(file_path):
-            return jsonify({'error': 'Invalid file_path'}), 400
+        print(f"📚 Teacher Forcing 학습 요청:")
+        print(f"   받은 데이터: {data}")
+        print(f"   파일: {file_path}")
+        print(f"   에폭: {epochs}")
+        print(f"   배치 크기: {batch_size}")
+        print(f"   학습률: {learning_rate}")
+        
+        if not file_path:
+            return jsonify({'error': 'file_path is required'}), 400
+        
+        # 파일 경로 확인 (절대 경로 또는 상대 경로)
+        if not os.path.isabs(file_path):
+            # 상대 경로인 경우 UPLOAD_FOLDER 기준으로 변환
+            file_path = os.path.join(UPLOAD_FOLDER, os.path.basename(file_path))
+        
+        print(f"   실제 파일 경로: {file_path}")
+        print(f"   파일 존재 여부: {os.path.exists(file_path)}")
+        
+        if not os.path.exists(file_path):
+            available_files = []
+            if os.path.exists(UPLOAD_FOLDER):
+                available_files = [f for f in os.listdir(UPLOAD_FOLDER) if f.endswith('.pkl')]
+            return jsonify({
+                'error': f'File not found: {file_path}',
+                'upload_folder': UPLOAD_FOLDER,
+                'available_files': available_files[:10]
+            }), 400
         
         # 데이터 로드
         with open(file_path, 'rb') as f:
@@ -458,32 +488,101 @@ def train_supervised():
         if len(demonstrations) == 0:
             return jsonify({'error': 'No demonstrations found'}), 400
         
+        # 상태 차원 자동 감지
+        state_dim = None
+        if len(demonstrations) > 0:
+            first_episode = demonstrations[0]
+            states = first_episode.get('states', [])
+            if len(states) > 0:
+                first_state = np.array(states[0])
+                if len(first_state.shape) == 1:
+                    state_dim = first_state.shape[0]
+                else:
+                    state_dim = first_state.size
+                print(f"📐 상태 차원 자동 감지: {state_dim}")
+        
+        if state_dim is None:
+            return jsonify({'error': 'Could not determine state_dim from demonstrations'}), 400
+        
+        # 액션 차원 확인
+        first_episode = demonstrations[0]
+        actions = first_episode.get('actions', [])
+        if len(actions) > 0:
+            action_dim = 5  # 기본값 (discrete actions: 0-4)
+            print(f"📐 액션 차원: {action_dim} (discrete)")
+        else:
+            return jsonify({'error': 'Could not determine action_dim from demonstrations'}), 400
+        
         # 에이전트 생성
         agent = PPOAgent(
-            state_dim=256,
-            action_dim=5,
+            state_dim=state_dim,
+            action_dim=action_dim,
             discrete_action=True,
             use_recurrent=False
         )
         
+        # 사전 학습된 모델 로드 (선택)
+        if model_path:
+            if not os.path.isabs(model_path):
+                # 상대 경로인 경우 프로젝트 루트 또는 MODEL_FOLDER 확인
+                if os.path.exists(model_path):
+                    pass
+                elif os.path.exists(os.path.join(MODEL_FOLDER, model_path)):
+                    model_path = os.path.join(MODEL_FOLDER, model_path)
+            
+            if os.path.exists(model_path):
+                print(f"📥 사전 학습된 모델 로드: {model_path}")
+                agent.load(model_path)
+                print(f"✅ 모델 로드 완료")
+            else:
+                print(f"⚠️  모델 파일을 찾을 수 없습니다: {model_path}")
+                print(f"   랜덤 초기화로 시작합니다.")
+        else:
+            # 기본 모델 확인
+            default_model = 'a3c_model_best.pth'
+            if os.path.exists(default_model):
+                print(f"📥 기본 모델 로드: {default_model}")
+                agent.load(default_model)
+                print(f"✅ 모델 로드 완료")
+            elif os.path.exists(os.path.join(MODEL_FOLDER, default_model)):
+                model_path = os.path.join(MODEL_FOLDER, default_model)
+                print(f"📥 기본 모델 로드: {model_path}")
+                agent.load(model_path)
+                print(f"✅ 모델 로드 완료")
+            else:
+                print(f"⚠️  기본 모델을 찾을 수 없습니다. 랜덤 초기화로 시작합니다.")
+        
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        print(f"디바이스: {device}")
+        
         # Trainer 생성 및 학습
-        trainer = TeacherForcingTrainer(agent, demonstrations)
+        trainer = TeacherForcingTrainer(agent, demonstrations, device=device, lr=learning_rate)
         model_path = os.path.join(MODEL_FOLDER, f"pretrained_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pth")
         
         trainer.pretrain(
             epochs=epochs,
             batch_size=batch_size,
-            save_path=model_path
+            save_path=model_path,
+            verbose=True
         )
         
         return jsonify({
             'status': 'success',
             'model_path': model_path,
-            'epochs': epochs
+            'epochs': epochs,
+            'state_dim': state_dim
         })
     
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        import traceback
+        error_msg = str(e)
+        error_trace = traceback.format_exc()
+        print(f"❌ Teacher Forcing 학습 실패:")
+        print(error_trace)
+        return jsonify({
+            'error': error_msg,
+            'traceback': error_trace
+        }), 500
 
 
 @app.route('/api/train/imitation_rl', methods=['POST'])

@@ -1,536 +1,346 @@
-# RC Car 제어 시스템
-
-Arduino와 Python을 사용한 시리얼 통신 기반 RC 카 제어 시스템
-
-## 시스템 구성
-
-- **Arduino**: AFMotor 라이브러리를 사용하여 2개의 DC 모터 제어
-- **Python**: pyserial을 사용하여 시리얼 통신으로 명령 전송
-
-## 하드웨어 연결
-
-- Motor 1: M1 포트 (왼쪽 모터)
-- Motor 2: M2 포트 (오른쪽 모터)
-- 시리얼 통신: USB 케이블로 Arduino와 컴퓨터 연결
-
-## 명령어 체계
-
-Arduino는 다음과 같은 명령어를 받아 처리합니다:
-
-| 명령어 | 설명 | 예시 |
-|--------|------|------|
-| `F[속도]` | 전진 | `F255` (최대 속도로 전진) |
-| `B[속도]` | 후진 | `B200` (속도 200으로 후진) |
-| `L[속도]` | 좌회전 | `L150` (속도 150으로 좌회전) |
-| `R[속도]` | 우회전 | `R180` (속도 180으로 우회전) |
-| `S` | 정지 | `S` (모터 정지) |
-
-- 속도 범위: 0-255 (PWM 값)
-- 명령어는 개행문자(`\n`)로 종료
-
-## 설치 방법
-
-### 1. Arduino 설정
-
-1. Arduino IDE 설치
-2. AFMotor 라이브러리 설치:
-   - Arduino IDE > 스케치 > 라이브러리 포함하기 > 라이브러리 관리
-   - "Adafruit Motor Shield" 검색 후 설치
-3. `test.ino` 파일을 Arduino에 업로드
-4. 시리얼 모니터로 "RC Car Ready!" 메시지 확인
-
-### 2. Python 환경 설정
-
-```bash
-# pyserial 설치
-pip install pyserial
-
-# 스크립트 실행 권한 부여 (Linux)
-chmod +x rc_car_controller.py
-```
-
-### 3. 시리얼 포트 확인
-
-**Linux:**
-```bash
-ls /dev/tty* | grep -E "(USB|ACM)"
-# 일반적으로 /dev/ttyUSB0 또는 /dev/ttyACM0
-
-# 권한 설정 (필요시)
-sudo chmod 666 /dev/ttyUSB0
-# 또는 사용자를 dialout 그룹에 추가
-sudo usermod -a -G dialout $USER
-```
-
-**Windows:**
-- 장치 관리자에서 COM 포트 확인 (예: COM3, COM4)
-
-## 사용 방법
-
-### 1. 인터랙티브 모드 (키보드 제어)
-
-```bash
-python rc_car_controller.py --port /dev/ttyUSB0 --mode interactive
-```
-
-키보드 명령어:
-- `w`: 전진
-- `s`: 후진
-- `a`: 좌회전
-- `d`: 우회전
-- `x`: 정지
-- `q`: 종료
-- `speed [값]`: 속도 변경 (예: `speed 150`)
-
-### 2. 데모 모드 (자동 테스트)
-
-```bash
-python rc_car_controller.py --port /dev/ttyUSB0 --mode demo
-```
-
-자동으로 전진, 후진, 좌회전, 우회전을 순차적으로 테스트합니다.
-
-### 3. Python 코드에서 직접 사용
-
-```python
-from rc_car_controller import RCCarController
-
-# RC Car 초기화
-car = RCCarController(port='/dev/ttyUSB0', baudrate=9600)
-
-# 명령 실행
-car.forward(200)      # 속도 200으로 전진
-time.sleep(2)         # 2초 대기
-car.stop()            # 정지
-
-car.left(150)         # 속도 150으로 좌회전
-time.sleep(1)
-car.stop()
-
-# 종료
-car.close()
-```
-
-## Raspberry Pi Camera
-
-### Installation
-
-The camera functionality requires the `picamera2` module, which is the modern camera library for Raspberry Pi OS (Bullseye and later).
-
-**Install picamera2:**
-```bash
-sudo apt-get update
-sudo apt-get install python3-picamera2
-```
-
-**Install OpenCV for image processing:**
-```bash
-pip install opencv-python numpy
-```
-
-**Important: Virtual Environment Configuration**
-
-`picamera2` is installed as a system package (via `apt`), not via `pip`. If you're using a virtual environment, you need to configure it to access system site packages:
-
-**Option 1: Recreate virtual environment with system site packages (Recommended)**
-```bash
-# Deactivate current virtual environment
-deactivate
-
-# Remove old virtual environment (if needed)
-rm -rf venv  # or your venv directory name
-
-# Create new virtual environment with system site packages
-python3 -m venv --system-site-packages venv
-
-# Activate the new virtual environment
-source venv/bin/activate
-
-# Verify picamera2 is accessible
-python3 -c "import picamera2; print('picamera2 imported successfully')"
-```
-
-**Option 2: Use system Python directly (outside virtual environment)**
-```bash
-# Deactivate virtual environment
-deactivate
-
-# Run scripts with system Python
-python3 raspberry_pi_camera.py --mode preview
-```
-
-**Option 3: Enable system site packages in existing virtual environment**
-```bash
-# Edit your virtual environment's pyvenv.cfg file
-# Change: include-system-site-packages = false
-# To:     include-system-site-packages = true
-
-# Or recreate as shown in Option 1
-```
-
-**Note:** This codebase uses `picamera2`, which is the standard camera library for modern Raspberry Pi OS. If you're using an older Raspberry Pi OS that only supports the legacy `picamera` module, you would need to use an older version of the code or upgrade your OS.
-
-### Camera Test Script
-
-A standalone camera test script (`raspberry_pi_camera.py`) is provided to test and display the Raspberry Pi camera feed.
-
-#### 1. Video Preview Mode
-
-Display real-time video feed from the camera:
-
-```bash
-python raspberry_pi_camera.py --mode preview
-```
-
-Options:
-- `--resolution WIDTH,HEIGHT`: Set camera resolution (default: 320,320)
-- `--framerate FPS`: Set frame rate (default: 30)
-- `--grayscale`: Enable grayscale mode
-- `--duration SECONDS`: Preview duration (default: infinite)
-- `--show-processed`: Also display processed 16x16 image
-
-Controls:
-- Press `q` to quit
-- Press `s` to save a snapshot
-
-Example:
-```bash
-# Preview with grayscale and processed image
-python raspberry_pi_camera.py --mode preview --grayscale --show-processed
-
-# Preview for 10 seconds
-python raspberry_pi_camera.py --mode preview --duration 10
-```
-
-#### 2. Single Image Capture
-
-Capture a single image:
-
-```bash
-python raspberry_pi_camera.py --mode capture --output image.jpg
-```
-
-#### 3. Processed Image Test
-
-Test the image processing pipeline (similar to `rc_car_interface.py`):
-
-```bash
-python raspberry_pi_camera.py --mode test --output processed.jpg
-```
-
-This mode:
-- Captures an image
-- Converts to grayscale
-- Applies threshold
-- Resizes to 16x16
-- Displays and optionally saves the result
-
-### Camera Integration
-
-The camera is integrated into the RC Car system through `rc_car_interface.py`:
-
-```python
-from rc_car_interface import RC_Car_Interface
-
-# Initialize interface (includes camera)
-rc_car = RC_Car_Interface()
-
-# Get processed image (16x16 grayscale)
-image = rc_car.get_image_from_camera()
-
-# Use image for AI/ML processing
-```
-
-The camera interface:
-- Resolution: 320x320
-- Grayscale mode enabled
-- Output: 16x16 processed binary image
-- Compatible with reinforcement learning environments
-
-### Troubleshooting
-
-**Camera not detected:**
-```bash
-# Check if camera is enabled
-sudo raspi-config
-# Navigate to: Interface Options > Camera > Enable
-
-# Check camera module
-vcgencmd get_camera
-# Should return: supported=1 detected=1
-```
-
-**Permission errors:**
-```bash
-# Add user to video group
-sudo usermod -a -G video $USER
-# Log out and log back in
-```
-
-**Import errors:**
-
-*"picamera2 module not found" in virtual environment:*
-- `picamera2` is a system package, not installable via `pip`
-- If using a virtual environment, recreate it with `--system-site-packages` flag:
-  ```bash
-  deactivate
-  rm -rf venv
-  python3 -m venv --system-site-packages venv
-  source venv/bin/activate
-  ```
-- Or use system Python directly (outside virtual environment):
-  ```bash
-  deactivate
-  python3 raspberry_pi_camera.py --mode preview
-  ```
-- Verify installation: `python3 -c "import picamera2; print(picamera2.__file__)"`
-
-*Other import issues:*
-- Ensure you're running on Raspberry Pi (picamera2 only works on Raspberry Pi)
-- Check Python version: `python3 --version` (should be 3.7+)
-- Install picamera2: `sudo apt install python3-picamera2`
-- Ensure camera is enabled: `sudo raspi-config` > Interface Options > Camera > Enable
-
-## 📚 학습 가이드
-
-**통합 학습 파이프라인 가이드**: 전체 학습 과정을 통합한 상세 가이드는 [`README_TRAINING_PIPELINE.md`](README_TRAINING_PIPELINE.md)를 참고하세요.
-
-- 모든 학습 방법 통합 (A3C, PPO, Teacher Forcing, Imitation RL, Human Feedback)
-- 권장 학습 파이프라인
-- 단계별 실행 예시
-- 서버-클라이언트 학습 방법
+# RC Car 자율주행 프로젝트
+
+
+## 목차
+
+1. [시스템 개요 및 Arduino↔Raspberry Pi 명령 흐름](#1-시스템-개요-및-arduino↔raspberry-pi-명령-흐름)
+2. [데이터 수집과 유틸리티](#2-데이터-수집과-유틸리티)
+3. [학습 방법 개요와 주요 파라미터](#3-학습-방법-개요와-주요-파라미터)
+4. [권장 학습 파이프라인](#4-권장-학습-파이프라인)
+5. [학습 방법별 상세 가이드](#5-학습-방법별-상세-가이드)
+6. [사전학습 모델과 현장 Teacher Forcing 운용](#6-사전학습-모델과-현장-teacher-forcing-운용)
+7. [서버 기반 학습 제어(REST API + client_upload.py)](#7-서버-기반-학습-제어rest-api--client_uploadpy)
+8. [문제 해결, 액션 정의, 참고 자료](#8-문제-해결-액션-정의-참고-자료)
 
 ---
 
-## 모델 사전학습 (Pretraining)
+## 1. 시스템 개요 및 Arduino↔Raspberry Pi 명령 흐름
 
-### 개요
+### 1.1 하드웨어 구성
+- **Arduino + Adafruit Motor Shield**: 좌/우 DC 모터 제어 (`test.ino` 업로드)
+- **Raspberry Pi**: 카메라 + 제어 스크립트 실행
+- **USB 시리얼**: Arduino와 Raspberry Pi/PC 간 통신 (9600 baud)
+- **카메라**: `picamera2` 기반 320×320 → 16×16 처리
 
-실제 RC Car 하드웨어에서 직접 학습하는 것은 비효율적이고 위험합니다. 대신 **CarRacing 시뮬레이션 환경**에서 먼저 사전학습한 후, 실제 하드웨어로 전이학습하는 것을 권장합니다.
+### 1.2 명령어 체계
 
-**권장 학습 파이프라인:**
-1. **CarRacing 환경에서 사전학습** (Gym CarRacing-v2) - 실제 하드웨어 없이 빠른 학습
-2. **실제 RC Car 환경으로 전이학습** (선택사항) - 사전학습된 모델을 Fine-tuning
-3. **실제 하드웨어에서 테스트/추론** - 학습된 모델로 자율주행 테스트
+| 명령 | 의미 | 예시 |
+|------|------|------|
+| `F[속도]` | 전진 | `F255` |
+| `L[속도]` | 좌회전 + 가속 | `L150` |
+| `R[속도]` | 우회전 + 가속 | `R150` |
+| `S` | 정지 (Coast) | `S` |
+| `X` | 브레이크 (즉시 정지) | `X` |
 
-### 사전 요구사항
+> **참고:** 안전상의 이유로 레거시 후진 명령(`B[속도]`)은 펌웨어에서 제거되었습니다. 필요 시 Arduino 스케치를 수정해 다시 활성화할 수 있지만, 기본 분포에서는 전진 기반 조향만 지원합니다.
 
+이와 별도로 CarRacing 호환을 위해 **이산 액션 0~4**도 지원합니다. `A0` 혹은 숫자 `0`만 보내도 되며, 매핑은 다음과 같습니다: `0/4=정지`, `1=우+가스`, `2=좌+가스`, `3=직진 가스`.
+
+- 속도 범위: 0~255 (PWM)
+- 명령은 `\n`으로 종료
+- Python 측에서 `pyserial`로 문자열 송신
+
+### 1.3 Python 제어 스크립트
+- `rc_car_controller.py --mode interactive`: 키보드 `w/a/s/d/x` 입력을 즉시 송신
+- `rc_car_controller.py --mode demo`: 전/후/좌/우/정지 순차 테스트
+- `rc_car_interface.py`: 카메라 캡처 + 16×16 전처리 + 추론 루프 보조
+
+### 1.4 카메라 준비
+1. `sudo apt-get install python3-picamera2`
+2. 가상환경이 필요하면 `python3 -m venv --system-site-packages venv`
+3. 미리보기:
+   ```bash
+   python raspberry_pi_camera.py --mode preview --show-processed
+   ```
+4. 테스트/캡처 모드: `--mode capture`, `--mode test`
+5. 문제 발생 시 `sudo raspi-config`에서 Camera Enable, `vcgencmd get_camera`로 상태 확인
+
+---
+
+## 2. 데이터 수집과 유틸리티
+
+### 2.1 사람 데모 수집 (`collect_human_demonstrations.py`)
 ```bash
-# 필요한 패키지 설치
-pip install torch numpy gym gymnasium pygame
+python collect_human_demonstrations.py \
+    --env-type real \
+    --port /dev/ttyACM0 \
+    --episodes 5 \
+    --output uploaded_data/human_demos.pkl
+```
+- 조작키: `w`(직진) / `a`(좌+가속) / `d`(우+가속) / `s`(정지) / `x`(브레이크) / `q`(에피소드 종료)
+- 저장 항목: `states`(16×16 이미지), `actions`(0~4), `rewards`, `dones`, `timestamps`
 
-# Box2D 설치 (CarRacing 환경에 필요)
-# Linux:
-sudo apt-get install swig
-pip install box2d-py
+#### 보상 계산 요약 (`rc_car_env.py`)
+- 중앙 밝기 기반 차선 추적 보상 (최대 0.5)
+- 속도 유지 보상 (0.3)
+- 프레임 안정성 (0.2), 방향 일관성 (0.1)
+- 너무 느린 경우 -0.5 페널티, 전진 보너스 +0.1
+- **Teacher Forcing/Imitation RL은 이 보상을 사용하지 않고 상태-액션 또는 일치율만 사용**하지만 데이터에는 저장되어 후처리에 활용 가능
 
-# 또는 직접:
-pip install gym[box2d]
+### 2.2 데모 병합 (`merge_demo_data.py`)
+```bash
+# 여러 파일 병합
+python merge_demo_data.py -i demos_a.pkl demos_b.pkl -o merged.pkl
+
+# 패턴 또는 디렉토리
+python merge_demo_data.py -p "uploaded_data/demos_*.pkl" -o merged.pkl
+python merge_demo_data.py -d uploaded_data -o merged.pkl
+```
+- 길이 불일치 자동 보정, 빈 에피소드 필터링, 메타데이터 기록(`merged_from_files`, `total_steps` 등)
+
+### 2.3 데이터 점검
+```bash
+python check_data_size.py uploaded_data/human_demos.pkl
+```
+- 총 에피소드/스텝, 상태 차원, 결측 여부 확인
+
+---
+
+## 3. 학습 방법 개요와 주요 파라미터
+
+| 방법 | 스크립트 | 목적 | 대표 파라미터 |
+|------|----------|------|----------------|
+| **A3C** | `train_a3c.py` | 멀티 프로세스 사전학습 | `--num-workers`, `--total-steps`, `--lr-actor`, `--lr-critic`, `--hidden-dim` |
+| **PPO (CarRacing/Sim)** | `train_ppo.py` | 시뮬레이션 기반 PPO | `--env-type`, `--total-steps`, `--update-frequency`, `--update-epochs`, `--use-extended-actions` |
+| **TRM + Teacher Forcing** | `train_with_teacher_forcing.py` | 상태·액션 Supervised 학습, TRM(Transformer-based Recurrent Model) 파라미터 공유 | `--pretrain-epochs`, `--pretrain-batch-size`, `--pretrain-lr`, `--n-cycles`, `--n-latent-loops`, `--n-deep-loops` |
+| **Imitation RL (TRM-PPO)** | `train_imitation_rl.py` | Teacher Forcing 후 Fine-tuning, 일치율 보상 | `--epochs`, `--batch-size`, `--learning-rate`, `--model`, `--sequence-mode`, `--deep-supervision`, `--n-supervision-steps` |
+| **Human Feedback** | `train_human_feedback.py` | 사람 평가 기반 RL | `--model`, `--num-episodes`, `--port`, `--save-path`, `--score-decay` |
+
+추가적으로 `train_with_teacher_forcing.py`의 `--rl-steps` 옵션을 사용하면 Teacher Forcing → PPO Fine-tuning을 단일 스크립트에서 수행할 수 있습니다.
+
+---
+
+## 4. 권장 학습 파이프라인
+
+### 4.1 시뮬레이션 중심 (권장)
+```
+1. train_ppo.py --env-type carracing (또는 train_a3c.py) 로 사전학습
+2. collect_human_demonstrations.py 로 실제 데이터 수집
+3. train_with_teacher_forcing.py 로 Supervised 사전학습
+4. train_imitation_rl.py 로 Fine-tuning (필요 시)
+5. train_human_feedback.py 로 추가 보정 (선택)
+6. run_ai_agent.py 또는 server_api 추론
 ```
 
-### 1단계: CarRacing 환경에서 사전학습
-
-CarRacing 시뮬레이션 환경에서 모델을 사전학습합니다. 이 단계는 실제 하드웨어 없이 일반 PC에서도 실행 가능합니다.
-
-```bash
-# 기본 사전학습 (500K 스텝)
-python pretrain_carracing.py --stage pretrain --pretrain-steps 500000
-
-# 커스텀 파라미터로 사전학습
-python pretrain_carracing.py \
-    --stage pretrain \
-    --pretrain-steps 1000000 \
-    --pretrain-save-path ppo_pretrained_1M.pth \
-    --max-episode-steps 1000 \
-    --update-frequency 2048 \
-    --update-epochs 10 \
-    --hidden-dim 256 \
-    --lr-actor 3e-4 \
-    --lr-critic 3e-4
+### 4.2 실제 환경 중심
+```
+1. 즉시 데모 데이터 수집
+2. Teacher Forcing (필수)
+3. Imitation RL
+4. Human Feedback (사람 평가)
+5. 배포/추론
 ```
 
-**주요 파라미터:**
-- `--pretrain-steps`: 총 학습 스텝 수 (기본: 500000)
-- `--pretrain-save-path`: 모델 저장 경로 (기본: `ppo_pretrained.pth`)
-- `--max-episode-steps`: 에피소드 최대 길이 (기본: 1000)
-- `--update-frequency`: PPO 업데이트 주기 (기본: 2048)
-- `--update-epochs`: 업데이트 시 에폭 수 (기본: 10)
-- `--hidden-dim`: 신경망 히든 레이어 차원 (기본: 256)
-- `--lr-actor`: Actor 학습률 (기본: 3e-4)
-- `--lr-critic`: Critic 학습률 (기본: 3e-4)
-- `--render`: 학습 중 시각화 활성화 (선택사항)
+각 단계에서 생성되는 모델 파일(`a3c_model_best.pth`, `pretrained_*.pth`, `imitation_rl_*.pth`)을 명확히 관리하세요.
 
-**학습 과정:**
-- 초기 (0~50K 스텝): 랜덤 액션, 트랙 이탈 빈번
-- 중기 (50K~200K 스텝): 차선 따라가기 패턴 학습
-- 후기 (200K~500K 스텝): 안정적인 주행, 트랙 유지
+---
 
-**학습 시간 예상:**
-- 500K 스텝: 약 2-4시간 (GPU 사용 시), 8-12시간 (CPU만 사용 시)
-- 1M 스텝: 약 4-8시간 (GPU 사용 시), 16-24시간 (CPU만 사용 시)
+## 5. 학습 방법별 상세 가이드
 
-### 2단계: 실제 RC Car 환경으로 전이학습 (선택사항)
-
-사전학습된 모델을 실제 RC Car 환경에서 Fine-tuning합니다. **이 단계는 라즈베리 파이에서만 실행 가능합니다.**
-
+### 5.1 A3C (`train_a3c.py`)
 ```bash
-# 사전학습된 모델을 로드하여 전이학습
-python pretrain_carracing.py \
-    --stage transfer \
-    --pretrain-save-path ppo_pretrained.pth \
-    --transfer-steps 50000 \
-    --transfer-save-path ppo_transferred.pth
-```
-
-**주의사항:**
-- ⚠️ 실제 하드웨어 사용 시 안전을 확인하세요!
-- RC Car가 충분한 공간에 있는지 확인
-- 카메라와 모터가 정상 작동하는지 확인
-- 학습 중 모니터링 권장
-
-**전이학습 특징:**
-- 사전학습된 모델을 로드하여 시작
-- 더 작은 학습률 사용 (기본 학습률의 10%)
-- 실제 카메라 이미지로 Fine-tuning
-- 일반적으로 50K~100K 스텝이면 충분
-
-### 3단계: 학습된 모델 테스트
-
-학습된 모델을 실제 RC Car 환경에서 테스트합니다.
-
-```bash
-# 전이학습된 모델 테스트
-python pretrain_carracing.py \
-    --stage test \
-    --transfer-save-path ppo_transferred.pth
-
-# 또는 사전학습 모델만 테스트
-python pretrain_carracing.py \
-    --stage test \
-    --pretrain-save-path ppo_pretrained.pth
-```
-
-**테스트 모드:**
-- 추론만 수행 (학습 없음)
-- 여러 에피소드 실행하여 성능 평가
-- 실제 주행 동작 관찰
-
-### 대안: 직접 train_ppo.py 사용
-
-`pretrain_carracing.py` 대신 `train_ppo.py`를 직접 사용할 수도 있습니다:
-
-```bash
-# CarRacing 환경에서 학습
-python train_ppo.py \
-    --env-type carracing \
-    --use-extended-actions \
+python train_a3c.py \
+    --num-workers 4 \
     --total-steps 500000 \
-    --save-path ppo_pretrained.pth \
-    --render  # 시각화 활성화 (선택사항)
-
-# 시뮬레이션 환경에서 학습
-python train_ppo.py \
-    --env-type sim \
-    --use-extended-actions \
-    --total-steps 200000 \
-    --save-path ppo_sim.pth
+    --save-path a3c_model_best.pth
 ```
+- CarRacing Gym 환경 사용
+- 다중 프로세스로 빠른 수렴
+- 주요 옵션: `--entropy-coef`, `--gamma`, `--gae-lambda`
 
-### 학습 모니터링
-
-학습 중 다음 정보가 출력됩니다:
-- 현재 스텝 수
-- 에피소드 리워드 (평균, 최소, 최대)
-- 에피소드 길이
-- PPO 손실 (Policy Loss, Value Loss)
-- 모델 저장 알림
-
-**학습 성공 지표:**
-- 에피소드 리워드가 점진적으로 증가
-- 에피소드 길이가 증가 (더 오래 주행)
-- 트랙 이탈 빈도 감소
-
-### 문제 해결
-
-**CarRacing 환경 오류:**
+### 5.2 PPO (`train_ppo.py`)
 ```bash
-# Box2D 설치 확인
-pip install box2d-py
+# CarRacing
+python train_ppo.py --env-type carracing --total-steps 500000 --save-path ppo_carracing.pth
 
-# 또는
-sudo apt-get install swig
-pip install gym[box2d]
+# 시뮬레이터
+python train_ppo.py --env-type sim --total-steps 200000 --save-path ppo_sim.pth
 ```
+- `--render`로 시각화
+- `--use-extended-actions` 활성화 시 RC Car 이산 액션에 맞춰짐
 
-**학습이 수렴하지 않음:**
-- 학습률 조정: `--lr-actor 1e-4 --lr-critic 1e-4`
-- 더 많은 스텝 학습: `--pretrain-steps 1000000`
-- 히든 차원 증가: `--hidden-dim 512`
-
-**메모리 부족:**
-- 배치 크기 감소: `--update-frequency 1024`
-- 에피소드 길이 감소: `--max-episode-steps 500`
-
-자세한 내용은 `README_PPO.md`와 `LEARNING_PIPELINE.md`를 참고하세요.
-
-## 모터 제어 로직
-
-### 전진 (Forward)
-- Motor 1: FORWARD, 속도 100%
-- Motor 2: FORWARD, 속도 100%
-
-### 후진 (Backward)
-- Motor 1: BACKWARD, 속도 100%
-- Motor 2: BACKWARD, 속도 100%
-
-### 좌회전 (Left)
-- Motor 1: FORWARD, 속도 50%
-- Motor 2: FORWARD, 속도 100%
-
-### 우회전 (Right)
-- Motor 1: FORWARD, 속도 100%
-- Motor 2: FORWARD, 속도 50%
-
-### 정지 (Stop)
-- Motor 1: RELEASE
-- Motor 2: RELEASE
-
-## 문제 해결
-
-### 1. 시리얼 포트를 찾을 수 없음
+### 5.3 Teacher Forcing + TRM (`train_with_teacher_forcing.py`)
 ```bash
-# Linux에서 포트 확인
-ls /dev/tty* | grep -E "(USB|ACM)"
-
-# 권한 문제 해결
-sudo chmod 666 /dev/ttyUSB0
+python train_with_teacher_forcing.py \
+    --demos uploaded_data/demos.pkl \
+    --pretrain-epochs 50 \
+    --pretrain-batch-size 64 \
+    --pretrain-lr 3e-4 \
+    --pretrain-save pretrained_model.pth
 ```
+- TRM(Transformer Reasoning Module) 기반 recurrent actor-critic
+- 훈련 중 Loss/Accuracy/ETA 출력, TensorBoard `runs/teacher_forcing_*`
+- 주요 Recurrent 파라미터:
+  - `--n-cycles`: reasoning block 반복 횟수
+  - `--n-latent-loops`, `--n-deep-loops`: latent 업데이트 제어
+  - `--deep-supervision` 사용 시 step-wise backprop 수행
+- `--rl-steps`와 `--rl-save`를 지정하면 사전학습 후 PPO Fine-tuning도 동시 실행 가능
 
-### 2. Arduino가 응답하지 않음
-- Arduino IDE의 시리얼 모니터가 닫혀있는지 확인
-- Arduino를 리셋 후 2초 대기
-- 보드레이트 확인 (9600)
-
-### 3. 모터가 움직이지 않음
-- 모터 드라이버 전원 연결 확인
-- 모터 포트 번호 확인 (M1, M2)
-- 배터리 전압 확인
-
-### 4. Python 모듈 없음
+### 5.4 Imitation RL (`train_imitation_rl.py`)
 ```bash
-pip install pyserial
+python train_imitation_rl.py \
+    --demos uploaded_data/demos.pkl \
+    --model pretrained_model.pth \
+    --epochs 20 \
+    --batch-size 64 \
+    --learning-rate 3e-4 \
+    --save trained_models/imitation_rl_latest.pth
+```
+- 입력 데이터에서 `state_dim` 자동 감지, 빈 에피소드 필터링
+- 기본적으로 `a3c_model_best.pth`를 시도해 로드
+- 리워드: 일치 +1.0 / 불일치 -0.1
+- 주요 옵션:
+  - `--sequence-mode`: 에피소드 단위 학습
+  - `--use-recurrent`: TRM Recurrent 모드
+  - `--deep-supervision`, `--n-supervision-steps`: Latent carry-over 학습
+  - `--max-grad-norm`, `--entropy-coef`, `--value-coef`
+- 훈련 로그: 에폭 진행률, 배치별 Match Rate, Loss, ETA
+
+### 5.5 Human Feedback (`train_human_feedback.py`)
+```bash
+python train_human_feedback.py \
+    --model pretrained_model.pth \
+    --port /dev/ttyACM0 \
+    --num-episodes 10 \
+    --save-path trained_models/feedback_model.pth
+```
+- 모델이 주행하는 동안 사용자가 0.0~1.0 점수를 입력하면 리워드로 사용
+- `--score-decay`로 과거 점수 영향 조절
+- 실제 환경 Fine-tuning용
+
+---
+
+## 6. 사전학습 모델과 현장 Teacher Forcing 운용
+
+1. **기본 모델**: `a3c_model_best.pth`  
+   - `train_imitation_rl.py`와 `server_api.py`에서 기본값으로 로드
+2. **Teacher Forcing CLI**:
+   ```bash
+   python3 train_with_teacher_forcing.py \
+       --demos uploaded_data/demos.pkl \
+       --pretrain-epochs 20 \
+       --pretrain-save trained_models/pretrained_$(date +%Y%m%d_%H%M%S).pth
+   ```
+3. **현장 재학습 절차**:
+   - 라즈베리 파이로 데모 수집
+   - `client_upload.py --server ... --train-supervised ...` 로 서버에서 학습
+   - 결과 모델을 다시 다운로드 후 추론 (`run_ai_agent.py --model ...`)
+4. **모델/파라미터 자동 감지**:
+   - `train_with_teacher_forcing.py`와 서버 엔드포인트 모두 `state_dim`을 데모 데이터에서 계산
+   - 학습률, 배치, 에폭은 JSON/CLI 인자로 조정
+
+---
+
+## 7. 서버 기반 학습 제어(REST API + client_upload.py)
+
+### 7.1 서버 실행
+```bash
+python server_api.py --host 0.0.0.0 --port 5000
+```
+- 업로드 폴더: `uploaded_data/`
+- 모델 폴더: `trained_models/`
+- GPU 서버에서 실행 권장
+
+### 7.2 client_upload.py 워크플로우
+```bash
+# 서버 상태 확인
+python3 client_upload.py --server http://SERVER_IP:5000 --health
+
+# 데이터 업로드
+python3 client_upload.py --server http://SERVER_IP:5000 --upload demos.pkl
+
+# Teacher Forcing 학습 요청
+python3 client_upload.py \
+    --server http://SERVER_IP:5000 \
+    --train-supervised uploaded_data/demos.pkl \
+    --epochs 20 \
+    --batch-size 64 \
+    --learning-rate 3e-4 \
+    --pretrain-model a3c_model_best.pth
+
+# Imitation RL 학습 요청
+python3 client_upload.py \
+    --server http://SERVER_IP:5000 \
+    --train uploaded_data/demos.pkl \
+    --pretrain-model trained_models/pretrained_xxx.pth \
+    --epochs 100 \
+    --batch-size 64 \
+    --learning-rate 3e-4
+
+# 모델 다운로드
+python3 client_upload.py --server http://SERVER_IP:5000 --download latest_model.pth
+```
+- `--train`와 `--train-imitation`은 같은 동작
+- Teacher Forcing 호출 시에도 이제 `learning_rate`, `model_path` 전달 가능
+
+### 7.3 직접 REST 호출
+```bash
+# Teacher Forcing
+curl -X POST http://SERVER_IP:5000/api/train/supervised \
+  -H "Content-Type: application/json" \
+  -d '{
+        "file_path": "uploaded_data/demos.pkl",
+        "epochs": 20,
+        "batch_size": 64,
+        "learning_rate": 0.0003,
+        "model_path": "a3c_model_best.pth"
+      }'
+
+# Imitation RL
+curl -X POST http://SERVER_IP:5000/api/train/imitation_rl \
+  -H "Content-Type: application/json" \
+  -d '{
+        "file_path": "uploaded_data/demos.pkl",
+        "epochs": 100,
+        "batch_size": 64,
+        "learning_rate": 0.0003
+      }'
 ```
 
-## 확장 아이디어
+### 7.4 파라미터 참고
 
-1. **속도 제어 개선**: 점진적 가속/감속 구현
-2. **센서 통합**: 초음파 센서로 장애물 회피
-3. **원격 제어**: WiFi/Bluetooth 모듈 추가
-4. **자율 주행**: 카메라 + AI 모델 통합
-5. **웹 인터페이스**: Flask/Django로 웹 컨트롤러 제작
+| 엔드포인트 | 필수 | 선택/기본값 |
+|------------|------|-------------|
+| `/api/train/supervised` | `file_path` | `epochs`(100), `batch_size`(64), `learning_rate`(3e-4), `model_path`(없으면 `a3c_model_best.pth` 탐색) |
+| `/api/train/imitation_rl` | `file_path` | `model_path`(기본 `a3c_model_best.pth`), `epochs`, `batch_size`, `learning_rate` |
+| `/api/upload_data` | 파일 스트림 | 자동으로 `uploaded_data/demos_*.pkl` 저장 |
 
-## 라이센스
+응답에는 학습된 모델 경로나 Match Rate 등이 포함되며, 실패 시 `traceback`을 함께 제공하므로 `client_upload.py`가 콘솔에 상세 오류를 출력합니다.
 
-이 프로젝트는 교육 목적으로 자유롭게 사용할 수 있습니다.
+---
+
+## 8. 문제 해결, 액션 정의, 참고 자료
+
+### 8.1 액션 정의 (이산 5개)
+
+| ID | 설명 | 모터 상태 |
+|----|------|-----------|
+| 0 | 정지/Coast | 양쪽 RELEASE |
+| 1 | 우회전 + 가속 | 좌측 빠름 / 우측 느림 |
+| 2 | 좌회전 + 가속 | 좌측 느림 / 우측 빠름 |
+| 3 | 직진 가속 | 양쪽 동일 전진 |
+| 4 | 브레이크 | 역방향 또는 급정지 |
+
+### 8.2 시리얼 & 카메라 트러블슈팅
+- 포트 확인: `ls /dev/tty* | grep -E "(USB|ACM)"`, 권한: `sudo chmod 666 /dev/ttyUSB0`
+- Arduino 응답 X: 시리얼 모니터 종료, 보드 리셋, 보드레이트 9600 확인
+- 카메라 인식 X: `sudo raspi-config` > Interface Options > Camera > Enable, `vcgencmd get_camera`
+
+### 8.3 유용한 스크립트 모음
+- `run_ai_agent.py`: 학습된 모델 추론
+- `upload_patches.py`: patch 단위 업로드
+- `train_human_feedback.py`: 사람 평가 기반 학습
+- `train_with_teacher_forcing.py`: Teacher Forcing + (선택) RL
+- `merge_demo_data.py`: 데모 통합 (삭제하지 말 것)
+
+### 8.4 README 정리 현황
+- `README_TRAINING_PIPELINE.md`, `TEACHER_FORCING_IMITATION_RL_GUIDE.md`, `SERVER_TRAINING_GUIDE.md`의 모든 내용은 본 `README.md`에 통합되었습니다.
+- 추가 문서가 필요한 경우 이 파일에서 섹션을 찾거나, 특정 스크립트의 docstring을 참고하세요.
+
+---
+
+## 라이선스
+
+교육/연구 목적으로 자유롭게 사용할 수 있습니다. 프로젝트 개선 사항이나 버그 리포트는 이 저장소의 이슈로 남겨주세요.
 
 

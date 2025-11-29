@@ -241,7 +241,7 @@ class ServerClient:
             traceback.print_exc()
             return None
     
-    def train_supervised(self, file_path, epochs=100, batch_size=64):
+    def train_supervised(self, file_path, epochs=100, batch_size=64, learning_rate=3e-4, model_path=None):
         """
         Supervised Learning 학습 요청
         
@@ -249,6 +249,8 @@ class ServerClient:
             file_path: 서버에 업로드된 파일 경로
             epochs: 학습 에폭 수
             batch_size: 배치 크기
+            learning_rate: 학습률
+            model_path: 사전 학습된 모델 경로 (선택)
         
         Returns:
             학습 결과 (dict)
@@ -257,8 +259,12 @@ class ServerClient:
             data = {
                 'file_path': file_path,
                 'epochs': epochs,
-                'batch_size': batch_size
+                'batch_size': batch_size,
+                'learning_rate': learning_rate
             }
+            if model_path:
+                data['model_path'] = model_path
+            
             response = requests.post(
                 f"{self.server_url}/api/train/supervised",
                 json=data,
@@ -266,8 +272,22 @@ class ServerClient:
             )
             response.raise_for_status()
             return response.json()
+        except requests.exceptions.HTTPError as e:
+            print(f"❌ 학습 요청 실패: {e}")
+            if e.response is not None:
+                try:
+                    error_detail = e.response.json()
+                    print(f"   상세 에러: {error_detail}")
+                    if 'traceback' in error_detail:
+                        print(f"   에러 추적:")
+                        print(error_detail['traceback'])
+                except:
+                    print(f"   응답 내용: {e.response.text}")
+            return None
         except Exception as e:
             print(f"❌ 학습 요청 실패: {e}")
+            import traceback
+            traceback.print_exc()
             return None
     
     def train_imitation_rl(self, file_path, model_path=None, epochs=100, batch_size=64, learning_rate=3e-4):
@@ -457,11 +477,14 @@ def main():
         result = client.train_supervised(
             args.train_supervised,
             epochs=args.epochs,
-            batch_size=args.batch_size
+            batch_size=args.batch_size,
+            learning_rate=args.learning_rate,
+            model_path=args.pretrain_model
         )
         if result:
             print(f"✅ 학습 완료!")
             print(f"   모델: {result.get('model_path')}")
+            print(f"   상태 차원: {result.get('state_dim', 'N/A')}")
             print(f"   최종 정확도: {result.get('final_accuracy', 'N/A')}")
     
     if args.train_imitation:
