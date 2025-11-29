@@ -24,8 +24,9 @@ import torch.optim as optim
 import pickle
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from collections import deque
+import time
 
 # 환경 및 에이전트 임포트
 from rc_car_sim_env import RCCarSimEnv
@@ -100,23 +101,28 @@ class TeacherForcingTrainer:
         
         return np.array(all_states), np.array(all_actions)
     
-    def train_epoch(self, batch_size: int = 64):
+    def train_epoch(self, batch_size: int = 64, verbose: bool = False):
         """
         단일 에폭 학습
         
         Args:
             batch_size: 배치 크기
+            verbose: 상세 출력 여부
         
         Returns:
             loss: 평균 손실
+            accuracy: 정확도 (일치율)
         """
         total_loss = 0.0
         num_batches = 0
+        correct_predictions = 0
+        total_predictions = 0
         
         # 데이터 셔플
         indices = np.random.permutation(len(self.states))
+        num_batches_total = (len(self.states) + batch_size - 1) // batch_size
         
-        for i in range(0, len(self.states), batch_size):
+        for batch_idx, i in enumerate(range(0, len(self.states), batch_size)):
             batch_indices = indices[i:i+batch_size]
             batch_states = self.states[batch_indices]
             batch_actions = self.actions[batch_indices]
@@ -161,6 +167,29 @@ class TeacherForcingTrainer:
             # Loss = -log P(실제_액션 | 상태) → 최소화하면 P(실제_액션 | 상태) 최대화
             loss = -log_probs.mean()
             
+            # 정확도 계산 (예측 액션과 실제 액션 비교)
+            with torch.no_grad():
+                try:
+                    if use_recurrent:
+                        # RecurrentActorCritic.get_action은 4개 값을 반환
+                        predicted_actions, _, _, _ = self.agent.actor_critic.get_action(
+                            states_tensor, deterministic=True
+                        )
+                    else:
+                        # ActorCritic.get_action은 3개 값을 반환
+                        predicted_actions, _, _ = self.agent.actor_critic.get_action(
+                            states_tensor, deterministic=True
+                        )
+                    
+                    if self.agent.actor_critic.discrete_action:
+                        predicted_actions = predicted_actions.cpu().numpy().flatten()
+                        actual_actions = batch_actions.flatten()
+                        correct_predictions += np.sum(predicted_actions == actual_actions)
+                        total_predictions += len(actual_actions)
+                except Exception:
+                    # 정확도 계산 실패 시 스킵
+                    pass
+            
             # 역전파
             self.optimizer.zero_grad()
             loss.backward()
@@ -169,8 +198,22 @@ class TeacherForcingTrainer:
             
             total_loss += loss.item()
             num_batches += 1
+            
+            # 배치 진행 상황 출력 (verbose 모드)
+            if verbose and (batch_idx + 1) % max(1, num_batches_total // 10) == 0:
+                current_loss = total_loss / num_batches
+                current_acc = correct_predictions / total_predictions if total_predictions > 0 else 0
+                print(f"  배치 {batch_idx+1}/{num_batches_total} | "
+                      f"Loss: {current_loss:.6f} | "
+                      f"Acc: {current_acc:.1%}", end='\r', flush=True)
         
-        return total_loss / num_batches if num_batches > 0 else 0.0
+        avg_loss = total_loss / num_batches if num_batches > 0 else 0.0
+        accuracy = correct_predictions / total_predictions if total_predictions > 0 else 0.0
+        
+        if verbose:
+            print()  # 줄바꿈
+        
+        return avg_loss, accuracy
     
     def pretrain(
         self,
@@ -200,7 +243,8 @@ class TeacherForcingTrainer:
         print(f"{'='*60}")
         print(f"에폭 수: {epochs}")
         print(f"배치 크기: {batch_size}")
-        print(f"데이터 크기: {len(self.states)}")
+        print(f"데이터 크기: {len(self.states):,}개 샘플")
+        print(f"총 배치 수: {(len(self.states) + batch_size - 1) // batch_size}개/에폭")
         print(f"{'='*60}\n")
         
         # TensorBoard 설정
@@ -212,33 +256,63 @@ class TeacherForcingTrainer:
             print(f"📊 TensorBoard 로그: {log_path}")
             print(f"   실행: tensorboard --logdir={log_dir}\n")
         
+        # 시간 측정
+        start_time = time.time()
+        epoch_start_time = time.time()
+        
         best_loss = float('inf')
+        best_accuracy = 0.0
         
         for epoch in range(epochs):
             # 학습
-            loss = self.train_epoch(batch_size)
+            loss, accuracy = self.train_epoch(batch_size, verbose=verbose)
             
-            # 로깅
-            if verbose and (epoch + 1) % 10 == 0:
-                print(f"[Epoch {epoch+1:4d}/{epochs}] Loss: {loss:.6f}")
+            # 시간 계산
+            epoch_time = time.time() - epoch_start_time
+            epoch_start_time = time.time()
+            elapsed_total = time.time() - start_time
+            
+            if epoch > 0:
+                avg_epoch_time = elapsed_total / (epoch + 1)
+                remaining_epochs = epochs - epoch - 1
+                eta_seconds = avg_epoch_time * remaining_epochs
+                eta_str = str(timedelta(seconds=int(eta_seconds)))
+            else:
+                eta_str = "계산 중..."
+            
+            # 로깅 (매 에포크마다 출력)
+            if verbose:
+                epoch_progress = (epoch + 1) / epochs * 100
+                print(f"[에포크 {epoch+1}/{epochs}] ({epoch_progress:.1f}%) | "
+                      f"Loss: {loss:.6f} | "
+                      f"Accuracy: {accuracy:.2%} | "
+                      f"시간: {epoch_time:.1f}초 | "
+                      f"예상 남은: {eta_str}")
             
             if writer:
                 writer.add_scalar('Train/Loss', loss, epoch)
+                writer.add_scalar('Train/Accuracy', accuracy, epoch)
             
             # 최고 모델 저장
             if loss < best_loss:
                 best_loss = loss
+                best_accuracy = accuracy
                 self.agent.save(save_path)
                 if verbose:
-                    print(f"  💾 최고 모델 저장: {save_path} (Loss: {loss:.6f})")
+                    print(f"  💾 최고 모델 저장: {save_path} (Loss: {loss:.6f}, Acc: {accuracy:.2%})")
         
         if writer:
             writer.close()
         
+        total_time = time.time() - start_time
+        
         print(f"\n{'='*60}")
-        print("Supervised Learning (Teacher Forcing) 사전 학습 완료")
+        print("✅ Supervised Learning (Teacher Forcing) 사전 학습 완료")
         print(f"{'='*60}")
         print(f"최종 손실: {best_loss:.6f}")
+        print(f"최종 정확도: {best_accuracy:.2%}")
+        print(f"총 학습 시간: {str(timedelta(seconds=int(total_time)))}")
+        print(f"평균 에포크 시간: {total_time/epochs:.1f}초")
         print(f"모델 저장: {save_path}")
         print(f"{'='*60}\n")
         
