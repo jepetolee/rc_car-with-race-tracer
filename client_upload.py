@@ -33,13 +33,13 @@ class ServerClient:
             print(f"❌ 서버 연결 실패: {e}")
             return None
     
-    def upload_data(self, file_path, chunk_size_mb=10):
+    def upload_data(self, file_path, chunk_size_kb=256):
         """
-        데이터 파일 업로드 (대용량 파일 지원)
+        데이터 파일 업로드 (스트리밍 방식)
         
         Args:
             file_path: 업로드할 pickle 파일 경로
-            chunk_size_mb: 청크 크기 (MB, 기본: 10MB)
+            chunk_size_kb: 청크 크기 (KB, 기본: 256KB)
         
         Returns:
             업로드 결과 (dict)
@@ -51,36 +51,102 @@ class ServerClient:
         # 파일 크기 확인
         file_size = os.path.getsize(file_path)
         file_size_mb = file_size / (1024 * 1024)
+        chunk_size = chunk_size_kb * 1024  # 바이트로 변환
+        total_chunks = (file_size + chunk_size - 1) // chunk_size
         
         print(f"📊 파일 크기: {file_size_mb:.2f} MB")
-        
-        # 파일이 크면 경고
-        if file_size_mb > 50:
-            print(f"⚠️  파일이 큽니다 ({file_size_mb:.2f} MB). 업로드에 시간이 걸릴 수 있습니다.")
+        print(f"📦 청크 크기: {chunk_size_kb} KB")
+        print(f"📦 총 청크 수: {total_chunks}")
+        print()
         
         try:
+            # 1. 업로드 초기화
+            print("🔄 업로드 초기화 중...")
+            init_data = {
+                'filename': os.path.basename(file_path),
+                'file_size': file_size,
+                'chunk_size': chunk_size,
+                'total_chunks': total_chunks
+            }
+            response = requests.post(
+                f"{self.server_url}/api/upload_data/init",
+                json=init_data,
+                timeout=10
+            )
+            response.raise_for_status()
+            result = response.json()
+            session_id = result.get('session_id')
+            
+            if not session_id:
+                print(f"❌ 세션 ID를 받지 못했습니다")
+                return None
+            
+            print(f"✅ 세션 ID: {session_id}")
+            print()
+            
+            # 2. 청크 단위로 전송
+            print("📤 청크 전송 시작...")
             with open(file_path, 'rb') as f:
-                files = {'file': (os.path.basename(file_path), f, 'application/octet-stream')}
-                
-                # 타임아웃 계산 (파일 크기에 따라)
-                timeout = max(60, int(file_size_mb * 2))  # 최소 60초, MB당 2초
-                print(f"⏱️  타임아웃: {timeout}초")
-                
-                response = requests.post(
-                    f"{self.server_url}/api/upload_data",
-                    files=files,
-                    timeout=timeout
-                )
-                response.raise_for_status()
-                return response.json()
+                chunk_index = 0
+                while True:
+                    chunk = f.read(chunk_size)
+                    if not chunk:
+                        break
+                    
+                    # 진행률 표시
+                    progress = (chunk_index + 1) / total_chunks * 100
+                    print(f"\r📤 전송 중... {chunk_index + 1}/{total_chunks} ({progress:.1f}%)", end='', flush=True)
+                    
+                    # 청크 전송
+                    files = {
+                        'chunk': (f'chunk_{chunk_index}', chunk, 'application/octet-stream')
+                    }
+                    data = {
+                        'session_id': session_id,
+                        'chunk_index': chunk_index,
+                        'chunk_size': len(chunk)
+                    }
+                    
+                    response = requests.post(
+                        f"{self.server_url}/api/upload_data/chunk",
+                        files=files,
+                        data=data,
+                        timeout=30
+                    )
+                    response.raise_for_status()
+                    
+                    chunk_index += 1
+            
+            print()  # 줄바꿈
+            print("✅ 모든 청크 전송 완료")
+            
+            # 3. 업로드 완료 신호
+            print("🔄 파일 조립 중...")
+            finish_data = {
+                'session_id': session_id
+            }
+            response = requests.post(
+                f"{self.server_url}/api/upload_data/finish",
+                json=finish_data,
+                timeout=60
+            )
+            response.raise_for_status()
+            result = response.json()
+            
+            print(f"✅ 업로드 완료!")
+            print(f"   파일: {result.get('filename')}")
+            print(f"   에피소드: {result.get('num_episodes')}")
+            print(f"   스텝: {result.get('total_steps')}")
+            
+            return result
+            
         except requests.exceptions.Timeout:
-            print(f"❌ 업로드 타임아웃 (파일이 너무 큽니다)")
-            print(f"💡 해결 방법:")
-            print(f"   1. 파일을 압축하거나")
-            print(f"   2. 서버의 타임아웃 설정을 늘리세요")
+            print(f"\n❌ 업로드 타임아웃")
             return None
         except Exception as e:
-            print(f"❌ 업로드 실패: {e}")
+            print(f"\n❌ 업로드 실패: {e}")
+            import traceback
+            traceback.print_exc()
             return None
     
     def train_supervised(self, file_path, epochs=100, batch_size=64):

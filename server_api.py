@@ -7,6 +7,7 @@ Flask 기반 REST API 서버
 import os
 import pickle
 import argparse
+import uuid
 from datetime import datetime
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
@@ -24,8 +25,13 @@ CORS(app)  # CORS 허용 (라즈베리 파이에서 접근 가능하도록)
 # 전역 변수
 UPLOAD_FOLDER = 'uploaded_data'
 MODEL_FOLDER = 'trained_models'
+TEMP_FOLDER = 'temp_uploads'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(MODEL_FOLDER, exist_ok=True)
+os.makedirs(TEMP_FOLDER, exist_ok=True)
+
+# 스트리밍 업로드 세션 관리
+upload_sessions = {}  # {session_id: {'filename': str, 'file_size': int, 'chunks': {}, 'total_chunks': int}}
 
 
 @app.route('/api/health', methods=['GET'])
@@ -35,6 +41,168 @@ def health_check():
         'status': 'ok',
         'timestamp': datetime.now().isoformat()
     })
+
+
+@app.route('/api/upload_data/init', methods=['POST'])
+def upload_data_init():
+    """
+    스트리밍 업로드 초기화
+    
+    요청:
+    - filename: 파일명
+    - file_size: 파일 크기
+    - chunk_size: 청크 크기
+    - total_chunks: 총 청크 수
+    
+    응답:
+    - session_id: 세션 ID
+    """
+    try:
+        data = request.json
+        filename = data.get('filename')
+        file_size = data.get('file_size')
+        chunk_size = data.get('chunk_size')
+        total_chunks = data.get('total_chunks')
+        
+        if not all([filename, file_size, chunk_size, total_chunks]):
+            return jsonify({'error': 'Missing required fields'}), 400
+        
+        # 세션 ID 생성
+        session_id = str(uuid.uuid4())
+        
+        # 세션 정보 저장
+        upload_sessions[session_id] = {
+            'filename': filename,
+            'file_size': file_size,
+            'chunk_size': chunk_size,
+            'total_chunks': total_chunks,
+            'chunks': {},  # {chunk_index: chunk_path}
+            'received_chunks': set()
+        }
+        
+        print(f"📥 업로드 세션 시작: {session_id} ({filename}, {file_size / (1024*1024):.2f} MB)")
+        
+        return jsonify({
+            'status': 'success',
+            'session_id': session_id
+        })
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/upload_data/chunk', methods=['POST'])
+def upload_data_chunk():
+    """
+    청크 업로드
+    
+    요청:
+    - session_id: 세션 ID
+    - chunk_index: 청크 인덱스
+    - chunk: 청크 데이터
+    
+    응답:
+    - status: success
+    - received_chunks: 받은 청크 수
+    """
+    try:
+        if 'chunk' not in request.files:
+            return jsonify({'error': 'No chunk provided'}), 400
+        
+        session_id = request.form.get('session_id')
+        chunk_index = int(request.form.get('chunk_index'))
+        
+        if session_id not in upload_sessions:
+            return jsonify({'error': 'Invalid session_id'}), 400
+        
+        session = upload_sessions[session_id]
+        chunk = request.files['chunk']
+        
+        # 청크 저장
+        chunk_path = os.path.join(TEMP_FOLDER, f"{session_id}_chunk_{chunk_index}")
+        chunk.save(chunk_path)
+        
+        session['chunks'][chunk_index] = chunk_path
+        session['received_chunks'].add(chunk_index)
+        
+        received = len(session['received_chunks'])
+        total = session['total_chunks']
+        
+        return jsonify({
+            'status': 'success',
+            'received_chunks': received,
+            'total_chunks': total
+        })
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/upload_data/finish', methods=['POST'])
+def upload_data_finish():
+    """
+    업로드 완료 및 파일 조립
+    
+    요청:
+    - session_id: 세션 ID
+    
+    응답:
+    - status: success
+    - file_path: 저장된 파일 경로
+    """
+    try:
+        data = request.json
+        session_id = data.get('session_id')
+        
+        if session_id not in upload_sessions:
+            return jsonify({'error': 'Invalid session_id'}), 400
+        
+        session = upload_sessions[session_id]
+        received = len(session['received_chunks'])
+        total = session['total_chunks']
+        
+        if received != total:
+            return jsonify({'error': f'Missing chunks: {received}/{total}'}), 400
+        
+        # 파일 조립
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"demos_{timestamp}.pkl"
+        filepath = os.path.join(UPLOAD_FOLDER, filename)
+        
+        print(f"🔨 파일 조립 중: {session['filename']} → {filename}")
+        
+        with open(filepath, 'wb') as f:
+            for i in range(total):
+                chunk_path = session['chunks'][i]
+                with open(chunk_path, 'rb') as chunk_file:
+                    f.write(chunk_file.read())
+                # 임시 청크 파일 삭제
+                os.remove(chunk_path)
+        
+        # 세션 삭제
+        del upload_sessions[session_id]
+        
+        # 데이터 검증
+        try:
+            with open(filepath, 'rb') as f:
+                data = pickle.load(f)
+            num_episodes = len(data.get('demonstrations', []))
+            total_steps = sum(len(ep.get('states', [])) for ep in data.get('demonstrations', []))
+        except Exception as e:
+            return jsonify({'error': f'Invalid pickle file: {str(e)}'}), 400
+        
+        print(f"✅ 파일 조립 완료: {filename} ({num_episodes} 에피소드, {total_steps} 스텝)")
+        
+        return jsonify({
+            'status': 'success',
+            'file_path': filepath,
+            'filename': filename,
+            'num_episodes': num_episodes,
+            'total_steps': total_steps
+        })
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/upload_data', methods=['POST'])

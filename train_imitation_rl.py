@@ -26,7 +26,7 @@ import torch.nn.functional as F
 from datetime import datetime
 import sys
 
-from ppo_agent import PPOAgent
+from ppo_agent import PPOAgent, LatentCarry
 from train_ppo import train_ppo
 
 
@@ -69,6 +69,7 @@ class ImitationRLTrainer:
         self.device = device
         self.batch_size = batch_size
         self.update_epochs = update_epochs
+        self.use_sequence_mode = True  # 시퀀스 모드: 에피소드 내 시퀀스 유지 및 latent 전달
         
         # 데모 데이터 로드
         print(f"📂 데모 데이터 로드: {demos_path}")
@@ -143,6 +144,174 @@ class ImitationRLTrainer:
             return 1.0  # 완전 일치
         else:
             return -0.1  # 불일치 페널티
+    
+    def train_step_sequence(
+        self, 
+        states: np.ndarray, 
+        expert_actions: np.ndarray,
+        is_first_batch: bool = False,
+        prev_latent: torch.Tensor = None
+    ):
+        """
+        시퀀스 학습 스텝 (이전 latent 전달)
+        
+        Args:
+            states: 상태 배열 [batch_size, 256]
+            expert_actions: 전문가 액션 배열 [batch_size]
+            is_first_batch: 에피소드의 첫 배치인지
+            prev_latent: 이전 배치의 latent (None이면 초기화)
+        
+        Returns:
+            stats: 통계 딕셔너리
+            next_latent: 다음 배치로 전달할 latent
+        """
+        states_tensor = torch.FloatTensor(states).to(self.device)
+        expert_actions_tensor = torch.LongTensor(expert_actions).to(self.device)
+        
+        batch_size = states_tensor.shape[0]
+        
+        # Latent 초기화 또는 이전 latent 사용
+        if is_first_batch or prev_latent is None:
+            latent = self.agent.actor_critic.init_latent.unsqueeze(0).expand(batch_size, -1).clone()
+        else:
+            # 이전 배치의 마지막 latent 사용 (배치 크기가 다를 수 있으므로 조정)
+            if prev_latent.shape[0] == batch_size:
+                latent = prev_latent.clone()
+            else:
+                # 배치 크기가 다르면 마지막 latent를 복제
+                latent = prev_latent[-1:].expand(batch_size, -1).clone()
+        
+        # 초기 액션 선택 (리워드 계산용)
+        # 시퀀스 모드에서는 carry를 사용하여 이전 정보 전달
+        carry = LatentCarry(latent=latent) if not (is_first_batch and prev_latent is None) else None
+        actions, log_probs, values, new_carry = self.agent.get_action_with_carry(
+            states_tensor, 
+            deterministic=False,
+            use_deep_supervision=False  # 학습 시에는 일반 forward 사용
+        )
+        
+        # 다음 배치를 위한 latent 업데이트
+        if new_carry is not None:
+            latent = new_carry.latent
+        actions_np = actions.cpu().numpy().flatten()
+        
+        # 리워드 계산
+        rewards = np.array([
+            self.compute_imitation_reward(pred, expert)
+            for pred, expert in zip(actions_np, expert_actions)
+        ])
+        rewards_tensor = torch.FloatTensor(rewards).to(self.device)
+        
+        # Advantage 계산
+        advantages = rewards_tensor - values.squeeze()
+        old_log_probs = log_probs.detach()
+        
+        # 통계 누적용
+        total_loss_sum = 0
+        total_actor_loss_sum = 0
+        total_value_loss_sum = 0
+        total_entropy_sum = 0
+        
+        # TRM 스타일: Step-wise Update (K번 반복)
+        # 시퀀스 모드에서는 각 상태마다 latent를 전달
+        next_latent = None
+        
+        if self.agent.use_recurrent and self.agent.deep_supervision:
+            # K번의 Supervision Loop
+            for step in range(self.agent.n_supervision_steps):
+                # 1. State Encoding
+                state_emb = self.agent.actor_critic.encoder(states_tensor)
+                
+                # 2. Deep Recursion (One Step of M x N)
+                next_latent, latent_grad, value, action_output = self.agent.actor_critic.deep_recursion(
+                    state_emb, latent, self.agent.n_deep_loops, self.agent.n_latent_loops
+                )
+                
+                # 3. Loss Calculation
+                value_pred = value.squeeze(-1)
+                value_loss = F.mse_loss(value_pred, rewards_tensor)
+                
+                # Policy Loss & Entropy
+                if self.agent.actor_critic.discrete_action:
+                    action_logits = action_output
+                    dist = torch.distributions.Categorical(logits=action_logits)
+                    new_log_probs = dist.log_prob(expert_actions_tensor.squeeze(-1))
+                    entropy = dist.entropy().mean()
+                else:
+                    action_mean, action_log_std = action_output
+                    std = torch.exp(action_log_std)
+                    dist = torch.distributions.Normal(action_mean, std)
+                    action_inv = torch.atanh(torch.clamp(expert_actions_tensor, -0.999, 0.999))
+                    log_prob = dist.log_prob(action_inv).sum(dim=-1, keepdim=True)
+                    log_prob -= torch.log(1 - torch.tanh(action_inv).pow(2) + 1e-6).sum(dim=-1, keepdim=True)
+                    new_log_probs = log_prob
+                    entropy = dist.entropy().sum(dim=-1, keepdim=True).mean()
+                
+                # Ratio & Surrogate Loss
+                ratio = torch.exp(new_log_probs - old_log_probs)
+                surr1 = ratio * advantages
+                surr2 = torch.clamp(ratio, 1 - self.agent.clip_epsilon, 1 + self.agent.clip_epsilon) * advantages
+                actor_loss = -torch.min(surr1, surr2).mean()
+                
+                # Total Loss for this step
+                loss = actor_loss + self.agent.value_coef * value_loss - self.agent.entropy_coef * entropy
+                
+                # 4. Backward & Update
+                self.agent.optimizer.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.agent.actor_critic.parameters(), self.agent.max_grad_norm)
+                self.agent.optimizer.step()
+                
+                # 통계 누적
+                total_loss_sum += loss.item()
+                total_actor_loss_sum += actor_loss.item()
+                total_value_loss_sum += value_loss.item()
+                total_entropy_sum += entropy.item()
+                
+                # 5. Pass detached latent to next step
+                latent = next_latent
+            
+            # 다음 배치로 전달할 latent (마지막 상태의 latent)
+            next_latent = next_latent[-1:].detach()  # 마지막 상태의 latent만 전달
+        else:
+            # 기존 방식
+            new_log_probs, new_values, entropy = self.agent.actor_critic.evaluate(
+                states_tensor, expert_actions_tensor.unsqueeze(-1)
+            )
+            
+            ratio = torch.exp(new_log_probs - old_log_probs)
+            surr1 = ratio * advantages
+            surr2 = torch.clamp(ratio, 1.0 - self.agent.clip_epsilon, 1.0 + self.agent.clip_epsilon) * advantages
+            actor_loss = -torch.min(surr1, surr2).mean()
+            
+            value_loss = F.mse_loss(new_values.squeeze(), rewards_tensor)
+            entropy_loss = -entropy.mean()
+            
+            total_loss = actor_loss + self.agent.value_coef * value_loss + self.agent.entropy_coef * entropy_loss
+            
+            self.agent.optimizer.zero_grad()
+            total_loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.agent.actor_critic.parameters(), self.agent.max_grad_norm)
+            self.agent.optimizer.step()
+            
+            total_loss_sum = total_loss.item()
+            total_actor_loss_sum = actor_loss.item()
+            total_value_loss_sum = value_loss.item()
+            total_entropy_sum = entropy.mean().item()
+        
+        match_rate = np.mean(actions_np == expert_actions)
+        avg_reward = np.mean(rewards)
+        
+        stats = {
+            'total_loss': total_loss_sum / self.agent.n_supervision_steps if self.agent.use_recurrent else total_loss_sum,
+            'actor_loss': total_actor_loss_sum / self.agent.n_supervision_steps if self.agent.use_recurrent else total_actor_loss_sum,
+            'value_loss': total_value_loss_sum / self.agent.n_supervision_steps if self.agent.use_recurrent else total_value_loss_sum,
+            'entropy': total_entropy_sum / self.agent.n_supervision_steps if self.agent.use_recurrent else total_entropy_sum,
+            'match_rate': match_rate,
+            'avg_reward': avg_reward
+        }
+        
+        return stats, next_latent
     
     def train_step(self, states: np.ndarray, expert_actions: np.ndarray):
         """
@@ -306,18 +475,7 @@ class ImitationRLTrainer:
         print(f"배치 크기: {self.batch_size}")
         print(f"{'='*60}\n")
         
-        # 데이터를 텐서로 변환
-        states_array = np.array(self.demo_states)  # [N, 256]
-        actions_array = np.array(self.demo_actions)  # [N]
-        
-        # 데이터 셔플
-        indices = np.arange(len(states_array))
-        
         for epoch in range(epochs):
-            np.random.shuffle(indices)
-            shuffled_states = states_array[indices]
-            shuffled_actions = actions_array[indices]
-            
             epoch_stats = {
                 'total_loss': [],
                 'actor_loss': [],
@@ -327,20 +485,66 @@ class ImitationRLTrainer:
                 'avg_reward': []
             }
             
-            # 배치별 학습
-            for i in range(0, len(shuffled_states), self.batch_size):
-                batch_states = shuffled_states[i:i+self.batch_size]
-                batch_actions = shuffled_actions[i:i+self.batch_size]
+            if self.use_sequence_mode:
+                # 시퀀스 모드: 에피소드별로 학습, 이전 latent 전달
+                # 에피소드 순서 셔플 (에피소드 내 시퀀스는 유지)
+                episode_indices = list(range(len(self.demos)))
+                np.random.shuffle(episode_indices)
                 
-                if len(batch_states) < self.batch_size:
-                    continue
-                
-                # 여러 번 업데이트
-                for _ in range(self.update_epochs):
-                    stats = self.train_step(batch_states, batch_actions)
+                for ep_idx in episode_indices:
+                    episode = self.demos[ep_idx]
+                    states = np.array(episode.get('states', []))
+                    actions = np.array(episode.get('actions', []))
                     
-                    for key, value in stats.items():
-                        epoch_stats[key].append(value)
+                    if len(states) == 0 or len(actions) == 0:
+                        continue
+                    
+                    # 에피소드 내 시퀀스를 배치로 나누어 학습 (latent 전달)
+                    prev_latent = None
+                    for i in range(0, len(states), self.batch_size):
+                        batch_states = states[i:i+self.batch_size]
+                        batch_actions = actions[i:i+self.batch_size]
+                        
+                        if len(batch_states) < 1:  # 최소 1개는 필요
+                            continue
+                        
+                        # 여러 번 업데이트
+                        for update_iter in range(self.update_epochs):
+                            is_first = (i == 0 and update_iter == 0)
+                            stats, prev_latent = self.train_step_sequence(
+                                batch_states, 
+                                batch_actions,
+                                is_first_batch=is_first,
+                                prev_latent=prev_latent if not is_first else None
+                            )
+                            
+                            for key, value in stats.items():
+                                epoch_stats[key].append(value)
+            else:
+                # 기존 모드: 셔플된 독립 샘플 학습
+                states_array = np.array(self.demo_states)  # [N, 256]
+                actions_array = np.array(self.demo_actions)  # [N]
+                
+                # 데이터 셔플
+                indices = np.arange(len(states_array))
+                np.random.shuffle(indices)
+                shuffled_states = states_array[indices]
+                shuffled_actions = actions_array[indices]
+                
+                # 배치별 학습
+                for i in range(0, len(shuffled_states), self.batch_size):
+                    batch_states = shuffled_states[i:i+self.batch_size]
+                    batch_actions = shuffled_actions[i:i+self.batch_size]
+                    
+                    if len(batch_states) < self.batch_size:
+                        continue
+                    
+                    # 여러 번 업데이트
+                    for _ in range(self.update_epochs):
+                        stats = self.train_step(batch_states, batch_actions)
+                        
+                        for key, value in stats.items():
+                            epoch_stats[key].append(value)
             
             # 에폭 통계
             if verbose and (epoch + 1) % 10 == 0:
