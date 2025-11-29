@@ -505,36 +505,73 @@ def train_imitation_rl_api():
     """
     try:
         data = request.json
+        if not data:
+            return jsonify({'error': 'No JSON data provided'}), 400
+        
         file_path = data.get('file_path')
         model_path = data.get('model_path')
         epochs = data.get('epochs', 100)
         batch_size = data.get('batch_size', 64)
         learning_rate = data.get('learning_rate', 3e-4)
         
-        if not file_path or not os.path.exists(file_path):
-            return jsonify({'error': 'Invalid file_path'}), 400
+        print(f"📚 Imitation RL 학습 요청:")
+        print(f"   파일: {file_path}")
+        print(f"   에폭: {epochs}")
+        print(f"   배치 크기: {batch_size}")
+        print(f"   학습률: {learning_rate}")
+        
+        if not file_path:
+            return jsonify({'error': 'file_path is required'}), 400
+        
+        if not os.path.exists(file_path):
+            return jsonify({'error': f'File not found: {file_path}'}), 400
+        
+        # 디바이스 선택 (GPU 사용 가능하면 cuda, 아니면 cpu)
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        print(f"   디바이스: {device}")
         
         # Trainer 생성 및 학습
-        trainer = ImitationRLTrainer(
-            demos_path=file_path,
-            model_path=model_path,
-            device='cpu',  # 서버에서도 CPU 사용 (GPU가 있다면 'cuda'로 변경)
-            learning_rate=learning_rate,
-            batch_size=batch_size
-        )
+        try:
+            trainer = ImitationRLTrainer(
+                demos_path=file_path,
+                model_path=model_path,
+                device=device,
+                learning_rate=learning_rate,
+                batch_size=batch_size
+            )
+        except Exception as e:
+            import traceback
+            error_msg = f"Trainer 생성 실패: {str(e)}"
+            print(f"❌ {error_msg}")
+            traceback.print_exc()
+            return jsonify({'error': error_msg}), 500
         
         model_filename = f"imitation_rl_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pth"
         model_path = os.path.join(MODEL_FOLDER, model_filename)
         
         # 학습 실행
-        trainer.train(
-            epochs=epochs,
-            save_path=model_path,
-            verbose=False  # 서버에서는 상세 출력 비활성화
-        )
+        try:
+            print(f"🚀 학습 시작...")
+            trainer.train(
+                epochs=epochs,
+                save_path=model_path,
+                verbose=False  # 서버에서는 상세 출력 비활성화
+            )
+            print(f"✅ 학습 완료: {model_path}")
+        except Exception as e:
+            import traceback
+            error_msg = f"학습 실행 실패: {str(e)}"
+            print(f"❌ {error_msg}")
+            traceback.print_exc()
+            return jsonify({'error': error_msg}), 500
         
         # 최종 평가
-        final_match_rate = trainer.evaluate()
+        try:
+            final_match_rate = trainer.evaluate()
+            print(f"📊 최종 일치율: {final_match_rate:.2%}")
+        except Exception as e:
+            print(f"⚠️  평가 실패: {e}")
+            final_match_rate = 0.0
         
         return jsonify({
             'status': 'success',
@@ -544,7 +581,11 @@ def train_imitation_rl_api():
         })
     
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        import traceback
+        error_msg = f"서버 오류: {str(e)}"
+        print(f"❌ {error_msg}")
+        traceback.print_exc()
+        return jsonify({'error': error_msg}), 500
 
 
 @app.route('/api/train/ppo', methods=['POST'])

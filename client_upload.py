@@ -381,9 +381,11 @@ def main():
     parser.add_argument('--upload', type=str,
                         help='업로드할 데이터 파일 경로')
     parser.add_argument('--train', type=str,
-                        help='학습할 데이터 파일 경로 (서버에 업로드된 파일)')
+                        help='Imitation RL 학습할 데이터 파일 경로 (서버에 업로드된 파일)')
+    parser.add_argument('--train-supervised', type=str,
+                        help='Supervised Learning 학습할 데이터 파일 경로')
     parser.add_argument('--train-imitation', type=str,
-                        help='Imitation RL 학습할 데이터 파일 경로')
+                        help='Imitation RL 학습할 데이터 파일 경로 (--train과 동일)')
     parser.add_argument('--pretrain-model', type=str,
                         help='사전 학습된 모델 경로 (Imitation RL용)')
     parser.add_argument('--epochs', type=int, default=100,
@@ -421,19 +423,32 @@ def main():
             print(f"   스텝: {result.get('total_steps')}")
             print(f"   파일 경로: {result.get('file_path')}")
     
-    # Supervised Learning 학습 요청
+    # Imitation RL 학습 요청 (--train 옵션)
     if args.train:
-        print(f"🎓 Supervised Learning 시작: {args.train}")
-        result = client.train_supervised(
+        print(f"🎓 Imitation RL 학습 시작: {args.train}")
+        result = client.train_imitation_rl(
             args.train,
             epochs=args.epochs,
-            batch_size=args.batch_size
+            batch_size=args.batch_size,
+            learning_rate=args.learning_rate
         )
         if result:
             print(f"✅ 학습 완료:")
             print(f"   모델 경로: {result.get('model_path')}")
     
     # Imitation RL 학습 요청
+    if args.train_supervised:
+        print(f"🎓 Supervised Learning 시작: {args.train_supervised}")
+        result = client.train_supervised(
+            args.train_supervised,
+            epochs=args.epochs,
+            batch_size=args.batch_size
+        )
+        if result:
+            print(f"✅ 학습 완료!")
+            print(f"   모델: {result.get('model_path')}")
+            print(f"   최종 정확도: {result.get('final_accuracy', 'N/A')}")
+    
     if args.train_imitation:
         print(f"🎓 Imitation RL 학습 시작: {args.train_imitation}")
         result = client.train_imitation_rl(
