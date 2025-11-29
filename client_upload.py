@@ -388,7 +388,7 @@ class ServerClient:
             model_path: 사용할 모델 경로 (선택)
         
         Returns:
-            추론 결과 (action, log_prob, value)
+            추론 결과 (action, q_values)
         """
         try:
             data = {'state': state}

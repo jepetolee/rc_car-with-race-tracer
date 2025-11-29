@@ -1,16 +1,23 @@
 #!/bin/bash
-# A3C 학습 스크립트 (nohup 로그 포함)
+# Multi-Worker TRM-DQN 학습 스크립트 (A3C 스타일, nohup)
 
 PYTHONUNBUFFERED=1 nohup python3 train_a3c.py \
-    --use-recurrent \
-    --update-frequency 2048 \
-    --num-workers 16 \
-    --total-steps 4000000 \
     --state-dim 784 \
     --hidden-dim 256 \
-    --entropy-coef 0.02 \
-    --gae-lambda 0.95 \
+    --latent-dim 256 \
+    --max-steps 1000000 \
+    --max-episode-steps 1000 \
+    --num-workers 20 \
+    --sync-interval 1000 \
+    --replay-buffer 200000 \
+    --batch-size 128 \
+    --learning-rate 3e-4 \
+    --eps-decay 300000 \
+    --target-update-interval 2000 \
+    --save-interval-steps 50000 \
+    --use-tensorboard \
     > training_a3c.log 2>&1 &
 
-echo "학습 시작됨! PID: $!"
+echo "Multi-Worker DQN 학습 시작됨! PID: $!"
+echo "워커 수: 16개"
 echo "로그 확인: tail -f training_a3c.log"

@@ -101,13 +101,13 @@ python check_data_size.py uploaded_data/human_demos.pkl
 
 | 방법 | 스크립트 | 목적 | 대표 파라미터 |
 |------|----------|------|----------------|
-| **A3C** | `train_a3c.py` | 멀티 프로세스 사전학습 | `--num-workers`, `--total-steps`, `--lr-actor`, `--lr-critic`, `--hidden-dim` |
-| **PPO (CarRacing/Sim)** | `train_ppo.py` | 시뮬레이션 기반 PPO | `--env-type`, `--total-steps`, `--update-frequency`, `--update-epochs`, `--use-extended-actions` |
-| **TRM + Teacher Forcing** | `train_with_teacher_forcing.py` | 상태·액션 Supervised 학습, TRM(Transformer-based Recurrent Model) 파라미터 공유 | `--pretrain-epochs`, `--pretrain-batch-size`, `--pretrain-lr`, `--n-cycles`, `--n-latent-loops`, `--n-deep-loops` |
-| **Imitation RL (TRM-PPO)** | `train_imitation_rl.py` | Teacher Forcing 후 Fine-tuning, 일치율 보상 | `--epochs`, `--batch-size`, `--learning-rate`, `--model`, `--sequence-mode`, `--deep-supervision`, `--n-supervision-steps` |
+| **TRM-DQN (Carracing)** | `train_a3c.py` | Carracing 기반 TRM-DQN | `--state-dim`, `--action-dim`, `--max-episodes`, `--eps-start`, `--eps-decay` |
+| **TRM-DQN (Sim/Real)** | `train_ppo.py` | 시뮬/실기 환경 TRM-DQN | `--env-type`, `--max-episodes`, `--eps-*`, `--target-update-interval`, `--save-interval` |
+| **Teacher Forcing (TRM-DQN)** | `train_with_teacher_forcing.py` | 데모 기반 Supervised + Offline Q-learning | `--pretrain-epochs`, `--batch-size`, `--offline-steps`, `--learning-rate` |
+| **Imitation RL (TRM-DQN Offline)** | `train_imitation_rl.py` | Teacher Forcing 후 Fine-tuning, 오프라인 Q-learning | `--epochs`, `--updates-per-epoch`, `--batch-size`, `--learning-rate`, `--model` |
 | **Human Feedback** | `train_human_feedback.py` | 사람 평가 기반 RL | `--model`, `--num-episodes`, `--port`, `--save-path`, `--score-decay` |
 
-추가적으로 `train_with_teacher_forcing.py`의 `--rl-steps` 옵션을 사용하면 Teacher Forcing → PPO Fine-tuning을 단일 스크립트에서 수행할 수 있습니다.
+추가적으로 `train_with_teacher_forcing.py`의 `--offline-steps` 옵션을 사용하면 Teacher Forcing 이후 곧바로 오프라인 Q-learning을 이어서 실행할 수 있습니다.
 
 ---
 
@@ -132,35 +132,34 @@ python check_data_size.py uploaded_data/human_demos.pkl
 5. 배포/추론
 ```
 
-각 단계에서 생성되는 모델 파일(`a3c_model_best.pth`, `pretrained_*.pth`, `imitation_rl_*.pth`)을 명확히 관리하세요.
+각 단계에서 생성되는 모델 파일(`dqn_model_*.pth`, `pretrained_*.pth`, `imitation_dqn_*.pth`)을 명확히 관리하세요.
 
 ---
 
 ## 5. 학습 방법별 상세 가이드
 
-### 5.1 A3C (`train_a3c.py`)
+### 5.1 TRM-DQN Carracing (`train_a3c.py`)
 ```bash
 python train_a3c.py \
-    --num-workers 4 \
-    --total-steps 500000 \
-    --save-path a3c_model_best.pth
+    --max-episodes 2000 \
+    --max-episode-steps 1000 \
+    --save-interval 100
 ```
-- CarRacing Gym 환경 사용
-- 다중 프로세스로 빠른 수렴
-- 주요 옵션: `--entropy-coef`, `--gamma`, `--gae-lambda`
+- CarRacing Gym 환경을 이용한 TRM-DQN 학습
+- epsilon 스케줄(`--eps-*`)과 target network 주기를 조절
 
-### 5.2 PPO (`train_ppo.py`)
+### 5.2 TRM-DQN (시뮬/실기, `train_ppo.py`)
 ```bash
-# CarRacing
-python train_ppo.py --env-type carracing --total-steps 500000 --save-path ppo_carracing.pth
+# Carracing
+python train_ppo.py --env-type carracing --max-episodes 2000 --save-interval 50
 
 # 시뮬레이터
-python train_ppo.py --env-type sim --total-steps 200000 --save-path ppo_sim.pth
+python train_ppo.py --env-type sim --max-episodes 500 --save-interval 50
 ```
-- `--render`로 시각화
-- `--use-extended-actions` 활성화 시 RC Car 이산 액션에 맞춰짐
+- `--env-type`으로 carracing/sim/real 선택
+- epsilon 스케줄(`--eps-*`)과 target network 갱신 주기를 조절
 
-### 5.3 Teacher Forcing + TRM (`train_with_teacher_forcing.py`)
+### 5.3 Teacher Forcing + TRM-DQN (`train_with_teacher_forcing.py`)
 ```bash
 python train_with_teacher_forcing.py \
     --demos uploaded_data/demos.pkl \
@@ -169,15 +168,11 @@ python train_with_teacher_forcing.py \
     --pretrain-lr 3e-4 \
     --pretrain-save pretrained_model.pth
 ```
-- TRM(Transformer Reasoning Module) 기반 recurrent actor-critic
-- 훈련 중 Loss/Accuracy/ETA 출력, TensorBoard `runs/teacher_forcing_*`
-- 주요 Recurrent 파라미터:
-  - `--n-cycles`: reasoning block 반복 횟수
-  - `--n-latent-loops`, `--n-deep-loops`: latent 업데이트 제어
-  - `--deep-supervision` 사용 시 step-wise backprop 수행
-- `--rl-steps`와 `--rl-save`를 지정하면 사전학습 후 PPO Fine-tuning도 동시 실행 가능
+- TRM 기반 Q-network를 데모로 Supervised pretrain
+- `--offline-steps` 설정 시 데모를 리플레이 버퍼에 채워 오프라인 Q-learning 실행
+- 주요 파라미터: `--pretrain-epochs`, `--batch-size`, `--learning-rate`, `--offline-steps`
 
-### 5.4 Imitation RL (`train_imitation_rl.py`)
+### 5.4 Imitation RL (오프라인 Q-learning, `train_imitation_rl.py`)
 ```bash
 python train_imitation_rl.py \
     --demos uploaded_data/demos.pkl \
@@ -187,15 +182,9 @@ python train_imitation_rl.py \
     --learning-rate 3e-4 \
     --save trained_models/imitation_rl_latest.pth
 ```
-- 입력 데이터에서 `state_dim` 자동 감지, 빈 에피소드 필터링
-- 기본적으로 `a3c_model_best.pth`를 시도해 로드
-- 리워드: 일치 +1.0 / 불일치 -0.1
-- 주요 옵션:
-  - `--sequence-mode`: 에피소드 단위 학습
-  - `--use-recurrent`: TRM Recurrent 모드
-  - `--deep-supervision`, `--n-supervision-steps`: Latent carry-over 학습
-  - `--max-grad-norm`, `--entropy-coef`, `--value-coef`
-- 훈련 로그: 에폭 진행률, 배치별 Match Rate, Loss, ETA
+- 데모에서 상태·액션·다음 상태를 추출하여 리플레이 버퍼에 적재
+- `--updates-per-epoch` 만큼 Q-learning을 반복하며 TRM-DQN을 미세 조정
+- 평가 시 데모와의 액션 일치율을 출력
 
 ### 5.5 Human Feedback (`train_human_feedback.py`)
 ```bash
@@ -205,16 +194,16 @@ python train_human_feedback.py \
     --num-episodes 10 \
     --save-path trained_models/feedback_model.pth
 ```
-- 모델이 주행하는 동안 사용자가 0.0~1.0 점수를 입력하면 리워드로 사용
-- `--score-decay`로 과거 점수 영향 조절
-- 실제 환경 Fine-tuning용
+- 모델 주행을 보여주고 사용자가 0.0~1.0 점수를 입력하면 해당 점수를 리워드로 사용
+- `--updates-per-episode`로 피드백 후 Q-learning 반복 횟수를 지정
+- 실제 하드웨어 Fine-tuning을 위한 절차
 
 ---
 
 ## 6. 사전학습 모델과 현장 Teacher Forcing 운용
 
-1. **기본 모델**: `a3c_model_best.pth`  
-   - `train_imitation_rl.py`와 `server_api.py`에서 기본값으로 로드
+1. **기본 모델**: `trained_models/pretrained_*.pth` (TRM-DQN)  
+   - Teacher Forcing/Imitation RL, 서버 API 모두 DQN 체크포인트를 사용
 2. **Teacher Forcing CLI**:
    ```bash
    python3 train_with_teacher_forcing.py \
@@ -222,13 +211,13 @@ python train_human_feedback.py \
        --pretrain-epochs 20 \
        --pretrain-save trained_models/pretrained_$(date +%Y%m%d_%H%M%S).pth
    ```
-3. **현장 재학습 절차**:
+3. **현장 재학습 절차 (TRM-DQN)**:
    - 라즈베리 파이로 데모 수집
    - `client_upload.py --server ... --train-supervised ...` 로 서버에서 학습
    - 결과 모델을 다시 다운로드 후 추론 (`run_ai_agent.py --model ...`)
 4. **모델/파라미터 자동 감지**:
-   - `train_with_teacher_forcing.py`와 서버 엔드포인트 모두 `state_dim`을 데모 데이터에서 계산
-   - 학습률, 배치, 에폭은 JSON/CLI 인자로 조정
+   - 모든 스크립트와 서버 엔드포인트가 `state_dim`을 데모에서 자동 추정
+   - 학습률, 배치, 에폭, 업데이트 횟수는 CLI/JSON 인자로 조정
 
 ---
 
@@ -256,14 +245,13 @@ python3 client_upload.py \
     --train-supervised uploaded_data/demos.pkl \
     --epochs 20 \
     --batch-size 64 \
-    --learning-rate 3e-4 \
-    --pretrain-model a3c_model_best.pth
+    --learning-rate 3e-4
 
 # Imitation RL 학습 요청
 python3 client_upload.py \
     --server http://SERVER_IP:5000 \
     --train uploaded_data/demos.pkl \
-    --pretrain-model trained_models/pretrained_xxx.pth \
+    --pretrain-model trained_models/pretrained_latest.pth \
     --epochs 100 \
     --batch-size 64 \
     --learning-rate 3e-4
@@ -291,7 +279,7 @@ python3 client_upload.py --server http://SERVER_IP:5000 --list
 # 📋 사용 가능한 모델 (5개):
 #    - pretrained_20251129_190816.pth (12345678 bytes, 2025-11-29T19:08:16)
 #    - imitation_rl_20251129_191640.pth (23456789 bytes, 2025-11-29T19:16:40)
-#    - a3c_model_best.pth (34567890 bytes, 2025-11-29T18:00:00)
+#    - dqn_model_20251129_180000.pth (34567890 bytes, 2025-11-29T18:00:00)
 #    ...
 
 # 2. 최신 모델 다운로드 (가장 최근에 저장된 모델)
@@ -390,7 +378,7 @@ curl -X POST http://SERVER_IP:5000/api/train/supervised \
         "epochs": 20,
         "batch_size": 64,
         "learning_rate": 0.0003,
-        "model_path": "a3c_model_best.pth"
+        "model_path": "trained_models/pretrained_latest.pth"
       }'
 
 # Imitation RL
@@ -408,8 +396,8 @@ curl -X POST http://SERVER_IP:5000/api/train/imitation_rl \
 
 | 엔드포인트 | 메서드 | 필수 | 선택/기본값 |
 |------------|--------|------|-------------|
-| `/api/train/supervised` | POST | `file_path` | `epochs`(100), `batch_size`(64), `learning_rate`(3e-4), `model_path`(없으면 `a3c_model_best.pth` 탐색) |
-| `/api/train/imitation_rl` | POST | `file_path` | `model_path`(기본 `a3c_model_best.pth`), `epochs`, `batch_size`, `learning_rate` |
+| `/api/train/supervised` | POST | `file_path` | `epochs`(100), `batch_size`(64), `learning_rate`(3e-4), `model_path`(선택) |
+| `/api/train/imitation_rl` | POST | `file_path` | `model_path`(선택), `epochs`, `batch_size`, `learning_rate`, `updates_per_epoch`(1000) |
 | `/api/upload_data` | POST | 파일 스트림 | 자동으로 `uploaded_data/demos_*.pkl` 저장 |
 | `/api/model/list` | GET | 없음 | 사용 가능한 모든 모델 목록 반환 |
 | `/api/model/latest` | GET | 없음 | 가장 최근에 저장된 모델 다운로드 |
@@ -513,7 +501,7 @@ python run_ai_agent.py \
 
 2. **모델 호환성**
    - 모델이 `state_dim=784` (28×28 이미지를 784차원 벡터로)을 사용하는지 확인
-   - TRM-PPO 모델 (`use_recurrent=True`)과 일반 PPO 모델 모두 지원
+   - TRM-DQN 체크포인트(`ppo_agent.DQNAgent`)만 지원
 
 3. **QR 코드 감지**
    - QR 코드가 카메라 화면 전체에서 감지됨
@@ -522,7 +510,7 @@ python run_ai_agent.py \
 
 4. **디버깅**
    - `--quiet` 옵션을 제거하여 상세 로그 확인
-   - 각 스텝의 액션, 리워드, 상태 가치가 출력됨
+   - 각 스텝의 액션, 리워드, 누적 리워드가 출력됨
 
 ### 8.4 유용한 스크립트 모음
 - `run_ai_agent.py`: 학습된 모델 추론 및 시험 주행

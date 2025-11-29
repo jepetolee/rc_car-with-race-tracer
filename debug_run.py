@@ -132,28 +132,26 @@ try:
 except Exception as e:
     print(f"⚠️  환경 종료 실패: {e}")
 
-# 5단계: PPO Agent 임포트
-print("\n[5단계] PPO Agent 임포트...")
+# 5단계: DQN Agent 임포트
+print("\n[5단계] DQN Agent 임포트...")
 try:
-    from ppo_agent import PPOAgent
-    print("✅ ppo_agent 임포트 성공")
+    from ppo_agent import DQNAgent
+    print("✅ DQNAgent 임포트 성공")
 except Exception as e:
-    print(f"❌ ppo_agent 임포트 실패: {e}")
+    print(f"❌ DQNAgent 임포트 실패: {e}")
     traceback.print_exc()
     sys.exit(1)
 
-# 6단계: PPO Agent 생성
-print("\n[6단계] PPO Agent 생성...")
+# 6단계: DQN Agent 생성
+print("\n[6단계] DQN Agent 생성...")
 try:
-    agent = PPOAgent(
-        state_dim=256,
-        action_dim=5,
-        discrete_action=True,
-        use_recurrent=True
+    agent = DQNAgent(
+        state_dim=784,
+        action_dim=5
     )
-    print("✅ PPO Agent 생성 성공")
+    print("✅ DQN Agent 생성 성공")
 except Exception as e:
-    print(f"❌ PPO Agent 생성 실패: {e}")
+    print(f"❌ DQN Agent 생성 실패: {e}")
     traceback.print_exc()
     sys.exit(1)
 

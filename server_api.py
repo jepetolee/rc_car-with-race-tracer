@@ -17,9 +17,9 @@ import torch
 
 # 학습 관련 임포트
 from train_with_teacher_forcing import TeacherForcingTrainer
-from train_ppo import train_ppo
+from train_ppo import train as train_dqn_env
 from train_imitation_rl import ImitationRLTrainer
-from ppo_agent import PPOAgent
+from ppo_agent import DQNAgent
 
 app = Flask(__name__)
 CORS(app)  # CORS 허용 (라즈베리 파이에서 접근 가능하도록)
@@ -505,111 +505,36 @@ def train_supervised():
         if state_dim is None:
             return jsonify({'error': 'Could not determine state_dim from demonstrations'}), 400
         
-        # 액션 차원 확인
         first_episode = demonstrations[0]
         actions = first_episode.get('actions', [])
         if len(actions) > 0:
-            action_dim = 5  # 기본값 (discrete actions: 0-4)
-            print(f"📐 액션 차원: {action_dim} (discrete)")
+            action_dim = int(np.max(actions)) + 1
         else:
             return jsonify({'error': 'Could not determine action_dim from demonstrations'}), 400
-        
-        # A3C 모델과 호환되도록 recurrent 구조 사용
-        # run_a3c.sh에서 --use-recurrent로 학습했으므로 동일한 구조 필요
-        agent = PPOAgent(
-            state_dim=state_dim,
-            action_dim=action_dim,
-            discrete_action=True,
-            use_recurrent=True,  # A3C 모델과 호환
-            latent_dim=256,      # A3C 기본값
-            n_cycles=4,          # A3C 기본값
-            hidden_dim=256       # A3C 기본값
-        )
-        loaded_model_path = None
-
-        def attempt_model_load(path, label):
-            nonlocal loaded_model_path
-            try:
-                agent.load(path)
-                loaded_model_path = path
-                print(f"✅ {label} 모델 로드 완료: {path}")
-                return True
-            except Exception as load_err:
-                error_msg = str(load_err)
-                # 에러 메시지가 너무 길면 요약
-                if len(error_msg) > 500:
-                    error_msg = error_msg[:500] + "... (truncated)"
-                print(f"⚠️ {label} 모델 로드 실패({path})")
-                print(f"   이유: 모델 구조가 호환되지 않습니다 (TRM 모델 vs 일반 모델).")
-                print(f"   랜덤 초기화로 계속 진행합니다.")
-                return False
-        
-        # 사전 학습된 모델 로드 (선택)
-        try:
-            # model_path 처리 (상대 경로인 경우 여러 위치 확인)
-            if model_path:
-                # 상대 경로인 경우 프로젝트 루트, MODEL_FOLDER, 현재 디렉토리 확인
-                if not os.path.isabs(model_path):
-                    # 여러 가능한 경로 확인
-                    possible_paths = [
-                        model_path,  # 현재 디렉토리 기준
-                        os.path.join(MODEL_FOLDER, model_path),  # MODEL_FOLDER 기준
-                        os.path.join(MODEL_FOLDER, os.path.basename(model_path)),  # 파일명만 사용
-                        os.path.join('.', model_path),  # 현재 디렉토리 명시
-                    ]
-                    
-                    found = False
-                    for candidate in possible_paths:
-                        if os.path.exists(candidate):
-                            model_path = candidate
-                            found = True
-                            break
-                    
-                    if not found:
-                        print(f"⚠️  지정된 모델 파일을 찾을 수 없습니다: {model_path}")
-                        print(f"   시도한 경로들: {possible_paths}")
-                        model_path = None
-            
-            # model_path가 제공되지 않으면 기본값으로 a3c_model_best.pth 사용
-            if not model_path:
-                default_model = 'a3c_model_best.pth'
-                default_paths = [
-                    default_model,
-                    os.path.join(MODEL_FOLDER, default_model)
-                ]
-                loaded = False
-                for candidate in default_paths:
-                    if candidate and os.path.exists(candidate):
-                        print(f"📥 기본 모델 로드 시도: {candidate}")
-                        loaded = attempt_model_load(candidate, "기본")
-                        if loaded:
-                            model_path = candidate  # 로드 성공한 경로 저장
-                            break
-                if not loaded:
-                    print(f"⚠️  기본 모델({default_model})을 찾을 수 없습니다. 랜덤 초기화로 시작합니다.")
-                    model_path = None
-            else:
-                # 지정된 모델 로드 시도
-                if os.path.exists(model_path):
-                    print(f"📥 지정된 모델 로드 시도: {model_path}")
-                    loaded = attempt_model_load(model_path, "지정된")
-                    if not loaded:
-                        print(f"⚠️  지정된 모델 로드 실패. 랜덤 초기화로 시작합니다.")
-                        model_path = None
-                else:
-                    print(f"⚠️  모델 파일이 존재하지 않습니다: {model_path}")
-                    print(f"   랜덤 초기화로 시작합니다.")
-                    model_path = None
-        except Exception as model_load_error:
-            # 모델 로드 과정에서 예상치 못한 오류가 발생해도 계속 진행
-            print(f"⚠️  모델 로드 과정에서 오류 발생: {model_load_error}")
-            print(f"   랜덤 초기화로 계속 진행합니다.")
-            model_path = None
+        print(f"📐 액션 차원: {action_dim}")
         
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        print(f"디바이스: {device}")
+        agent = DQNAgent(
+            state_dim=state_dim,
+            action_dim=action_dim,
+            device=device,
+            hidden_dim=256,
+            latent_dim=256,
+        )
+        loaded_model_path = None
+        if model_path and os.path.exists(model_path):
+            try:
+                agent.load(model_path, strict=False)
+                loaded_model_path = model_path
+                print(f"✅ 기존 모델 로드 완료: {model_path}")
+            except Exception as e:
+                print(f"⚠️  모델 로드 실패: {e}. 랜덤 초기화로 진행합니다.")
+                model_path = None
+        else:
+            if model_path:
+                print(f"⚠️  모델 파일을 찾을 수 없습니다: {model_path}")
+            model_path = None
         
-        # Trainer 생성 및 학습
         trainer = TeacherForcingTrainer(agent, demonstrations, device=device, lr=learning_rate)
         model_path = os.path.join(MODEL_FOLDER, f"pretrained_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pth")
         
@@ -727,58 +652,22 @@ def train_imitation_rl_api():
                     print(f"   시도한 경로들: {possible_paths}")
                     model_path = None
         
-        # model_path가 제공되지 않으면 기본값으로 a3c_model_best.pth 사용
-        if not model_path:
-            default_model = 'a3c_model_best.pth'
-            # 프로젝트 루트와 MODEL_FOLDER 둘 다 확인
-            if os.path.exists(default_model):
-                model_path = default_model
-            elif os.path.exists(os.path.join(MODEL_FOLDER, default_model)):
-                model_path = os.path.join(MODEL_FOLDER, default_model)
-            else:
-                print(f"⚠️  기본 모델({default_model})을 찾을 수 없습니다. 랜덤 초기화로 시작합니다.")
-                model_path = None
-        
-        # model_path 최종 확인 및 로그 출력
-        if model_path:
-            print(f"   사전 학습 모델: {model_path}")
-            if not os.path.exists(model_path):
-                print(f"⚠️  모델 파일이 존재하지 않습니다: {model_path}")
-                print(f"   랜덤 초기화로 시작합니다.")
-                model_path = None
-        else:
-            print(f"   사전 학습 모델: 없음 (랜덤 초기화)")
-        
-        # 디바이스 선택 (GPU 사용 가능하면 cuda, 아니면 cpu)
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
         print(f"   디바이스: {device}")
+        trainer = ImitationRLTrainer(
+            demos_path=file_path,
+            model_path=model_path if model_path and os.path.exists(model_path) else None,
+            device=device,
+            learning_rate=learning_rate,
+            batch_size=batch_size
+        )
+        updates_per_epoch = data.get('updates_per_epoch', 1000)
         
-        # Trainer 생성 및 학습
         try:
-            trainer = ImitationRLTrainer(
-                demos_path=file_path,
-                model_path=model_path,
-                device=device,
-                learning_rate=learning_rate,
-                batch_size=batch_size
-            )
-        except Exception as e:
-            import traceback
-            error_msg = f"Trainer 생성 실패: {str(e)}"
-            print(f"❌ {error_msg}")
-            traceback.print_exc()
-            return jsonify({'error': error_msg}), 500
-        
-        model_filename = f"imitation_rl_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pth"
-        model_path = os.path.join(MODEL_FOLDER, model_filename)
-        
-        # 학습 실행
-        try:
-            print(f"🚀 학습 시작...")
-            trainer.train(
+            print("🚀 학습 시작...")
+            model_path = trainer.train(
                 epochs=epochs,
-                save_path=model_path,
-                verbose=False  # 서버에서는 상세 출력 비활성화
+                updates_per_epoch=updates_per_epoch
             )
             print(f"✅ 학습 완료: {model_path}")
         except Exception as e:
@@ -814,24 +703,49 @@ def train_imitation_rl_api():
 @app.route('/api/train/ppo', methods=['POST'])
 def train_ppo_api():
     """
-    PPO 강화학습 시작
+    TRM-DQN 강화학습 시작
     
     요청:
-    - model_path: 사전 학습된 모델 경로 (선택)
-    - env_type: 환경 타입 (carracing/sim)
-    - total_steps: 총 학습 스텝 수
-    - ...
+    - env_type: 환경 타입 (carracing/sim/real)
+    - epsilon/학습률 등 DQN 하이퍼파라미터
     
     응답:
     - status: success
     - model_path: 학습된 모델 경로
     """
     try:
-        data = request.json
-        # TODO: PPO 학습 로직 구현
+        data = request.json or {}
+        config = argparse.Namespace(
+            env_type=data.get('env_type', 'carracing'),
+            state_dim=data.get('state_dim', 784),
+            action_dim=data.get('action_dim', 5),
+            hidden_dim=data.get('hidden_dim', 256),
+            latent_dim=data.get('latent_dim', 256),
+            n_deep_loops=data.get('n_deep_loops', 2),
+            n_latent_loops=data.get('n_latent_loops', 2),
+            gamma=data.get('gamma', 0.99),
+            learning_rate=data.get('learning_rate', 3e-4),
+            batch_size=data.get('batch_size', 128),
+            replay_buffer=data.get('replay_buffer', 200_000),
+            target_update_interval=data.get('target_update_interval', 2000),
+            max_grad_norm=data.get('max_grad_norm', 1.0),
+            max_episodes=data.get('max_episodes', 1000),
+            max_episode_steps=data.get('max_episode_steps', 1000),
+            eps_start=data.get('eps_start', 1.0),
+            eps_end=data.get('eps_end', 0.05),
+            eps_decay=data.get('eps_decay', 300_000),
+            save_dir=MODEL_FOLDER,
+            save_interval=data.get('save_interval', 50),
+            use_tensorboard=False,
+        )
+        train_dqn_env(config)
+        latest_models = sorted(
+            [f for f in os.listdir(MODEL_FOLDER) if f.endswith('.pth')]
+        )
+        model_path = os.path.join(MODEL_FOLDER, latest_models[-1]) if latest_models else None
         return jsonify({
             'status': 'success',
-            'message': 'PPO training started (async)'
+            'model_path': model_path
         })
     
     except Exception as e:
@@ -940,8 +854,7 @@ def inference():
     
     응답:
     - action: 추론된 액션 (0-4)
-    - log_prob: 로그 확률
-    - value: 상태 가치
+    - q_values: 각 액션의 Q값
     """
     try:
         data = request.json
@@ -960,26 +873,21 @@ def inference():
             model_path = os.path.join(MODEL_FOLDER, sorted(model_files)[-1])
         
         # 에이전트 로드 및 추론
-        agent = PPOAgent(
-            state_dim=256,
+        state_dim = len(state)
+        agent = DQNAgent(
+            state_dim=state_dim,
             action_dim=5,
-            discrete_action=True
+            device='cpu',
         )
-        agent.load(model_path)
+        agent.load(model_path, strict=False)
         
-        # 추론 (recurrent 값 승계를 위해 get_action_with_carry 사용)
-        state_tensor = torch.FloatTensor(state).unsqueeze(0)
-        if hasattr(agent, 'use_recurrent') and agent.use_recurrent:
-            action, log_prob, value, _ = agent.get_action_with_carry(
-                state_tensor, deterministic=True
-            )
-        else:
-            action, log_prob, value = agent.actor_critic.get_action(state_tensor)
-        
+        state_vec = np.array(state, dtype=np.float32)
+        action = agent.act_greedy(state_vec)
+        q_values = agent.predict(np.expand_dims(state_vec, axis=0))[0]
+
         return jsonify({
-            'action': int(action.item()),
-            'log_prob': float(log_prob.item()),
-            'value': float(value.item())
+            'action': int(action),
+            'q_values': [float(q) for q in q_values]
         })
     
     except Exception as e:

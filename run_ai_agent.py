@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 AI 에이전트 실행 스크립트
-학습된 PPO 모델을 로드하여 RC Car를 0.1초 간격으로 제어
+학습된 TRM-DQN 모델을 로드하여 RC Car를 제어
 
 QR 코드 감지 기능:
     - 실제 하드웨어 환경(--env-type real)에서 자동 활성화
@@ -45,7 +45,7 @@ from datetime import datetime
 # 환경 및 에이전트 임포트
 from rc_car_sim_env import RCCarSimEnv
 from car_racing_env import CarRacingEnvWrapper
-from ppo_agent import PPOAgent
+from ppo_agent import DQNAgent
 from rc_car_controller import RCCarController
 
 # 실제 하드웨어 환경은 선택적 임포트
@@ -181,65 +181,36 @@ class AIAgentRunner:
             )
             print("✅ 실제 하드웨어 환경 사용")
             return env
-        
         else:
             raise ValueError(f"알 수 없는 환경 타입: {self.env_type}")
     
+    @staticmethod
+    def _normalize_state_array(state: np.ndarray) -> np.ndarray:
+        arr = state.astype(np.float32).reshape(-1)
+        if arr.max() > 1.0:
+            arr = arr / 255.0
+        return arr
+    
     def _load_agent(self):
         """에이전트 생성 및 모델 로드"""
-        # 모델 파일에서 설정 정보 먼저 읽기
-        use_recurrent = True  # 기본값
-        latent_dim = 256
-        hidden_dim = 256
-        n_cycles = 4
-        carry_latent = True
-        
-        if os.path.exists(self.model_path):
-            try:
-                # 모델 파일에서 config 정보만 먼저 읽기
-                map_location = 'cpu' if not torch.cuda.is_available() else self.device
-                try:
-                    checkpoint = torch.load(self.model_path, map_location=map_location, weights_only=False)
-                except TypeError:
-                    checkpoint = torch.load(self.model_path, map_location=map_location)
-                
-                if 'config' in checkpoint:
-                    config = checkpoint['config']
-                    use_recurrent = config.get('use_recurrent', True)
-                    latent_dim = config.get('latent_dim', 256)
-                    n_cycles = config.get('n_cycles', 4)
-                    carry_latent = config.get('carry_latent', True)
-                    print(f"📋 모델 설정 정보 읽기 완료:")
-                    print(f"   - use_recurrent: {use_recurrent}")
-                    print(f"   - latent_dim: {latent_dim}")
-                    print(f"   - n_cycles: {n_cycles}")
-                    print(f"   - carry_latent: {carry_latent}")
-                else:
-                    print(f"⚠️  모델 파일에 config 정보가 없습니다. 기본값을 사용합니다.")
-                    print(f"   - use_recurrent: {use_recurrent} (기본값)")
-            except Exception as e:
-                print(f"⚠️  모델 설정 정보 읽기 실패: {e}")
-                print(f"   기본값을 사용합니다: use_recurrent={use_recurrent}")
-        
-        # 모델 설정에 맞게 에이전트 생성
-        agent = PPOAgent(
-            state_dim=784,  # 28x28 이미지 = 784 차원 (환경 출력과 일치)
-            action_dim=5,  # 이산 액션만 (고정)
-            latent_dim=latent_dim,
-            hidden_dim=hidden_dim,
-            n_cycles=n_cycles,
-            carry_latent=carry_latent,
+        probe = self.env.reset()
+        probe_state = probe[0] if isinstance(probe, tuple) else probe
+        state_vec = self._normalize_state_array(probe_state)
+        state_dim = state_vec.shape[0]
+        action_dim = 5
+
+        agent = DQNAgent(
+            state_dim=state_dim,
+            action_dim=action_dim,
+            hidden_dim=256,
+            latent_dim=256,
             device=self.device,
-            discrete_action=True,  # 이산 액션만
-            num_discrete_actions=5,
-            use_recurrent=use_recurrent
         )
-        
-        # 모델 로드 (안전한 방식)
+
         if os.path.exists(self.model_path):
             try:
                 print(f"📥 모델 가중치 로드 중: {self.model_path}")
-                agent.load(self.model_path)
+                agent.load(self.model_path, strict=False)
                 print(f"✅ 모델 로드 완료: {self.model_path}")
             except Exception as e:
                 print(f"⚠️  모델 로드 실패: {e}")
@@ -247,7 +218,8 @@ class AIAgentRunner:
         else:
             print(f"⚠️  모델 파일을 찾을 수 없습니다: {self.model_path}")
             print("랜덤 정책으로 실행합니다.")
-        
+
+        self.env.reset()
         return agent
     
     def run_episode(self, render: bool = False, verbose: bool = True):
@@ -269,9 +241,7 @@ class AIAgentRunner:
         else:
             state = reset_result  # Gym
         
-        # TRM-PPO: 잠재 상태 초기화
-        if hasattr(self.agent, 'use_recurrent') and self.agent.use_recurrent:
-            self.agent.reset_carry()
+        # Recurrent 가정 제거: reset_carry() 호출 불필요 (각 스텝마다 이미지 인코딩 결과 사용)
         
         episode_reward = 0.0
         episode_length = 0
@@ -299,35 +269,8 @@ class AIAgentRunner:
                         if verbose:
                             print(f"⚠️  QR 코드 체크 실패: {qr_error}")
                 
-                # 상태 정규화 [0, 255] -> [0, 1]
-                state_normalized = state.astype(np.float32) / 255.0
-                state_tensor = torch.FloatTensor(state_normalized).unsqueeze(0).to(self.device)
-                
-                # 액션 선택 (deterministic: 최대 확률 액션)
-                if hasattr(self.agent, 'use_recurrent') and self.agent.use_recurrent:
-                    action, _, value, _ = self.agent.get_action_with_carry(
-                        state_tensor, deterministic=True
-                    )
-                else:
-                    action, _, value = self.agent.actor_critic.get_action(
-                        state_tensor, deterministic=True
-                    )
-                
-                # 액션 변환
-                if self.use_discrete_actions:
-                    if isinstance(action, torch.Tensor):
-                        action_np = action.squeeze(0).cpu().detach().numpy()
-                        if action_np.ndim == 0:
-                            action_np = int(action_np)
-                        else:
-                            action_np = int(action_np[0]) if len(action_np) > 0 else int(action_np)
-                    else:
-                        action_np = int(action)
-                else:
-                    if isinstance(action, torch.Tensor):
-                        action_np = action.squeeze(0).cpu().detach().numpy()
-                    else:
-                        action_np = np.array(action)
+                state_vec = self._normalize_state_array(state)
+                action_np = self.agent.act_greedy(state_vec)
                 
                 # 실제 하드웨어 제어 (real 모드일 때)
                 if self.controller is not None and self.use_discrete_actions:
@@ -346,11 +289,12 @@ class AIAgentRunner:
                         3: "Gas", 4: "Brake"
                     }.get(action_np, f"Action {action_np}") if self.use_discrete_actions else f"Action {action_np}"
                     
-                    print(f"[Step {step+1:4d}] "
-                          f"Action: {action_name:12s} | "
-                          f"Reward: {reward:7.3f} | "
-                          f"Total: {episode_reward:7.3f} | "
-                          f"Value: {value.item():7.3f}")
+                    print(
+                        f"[Step {step+1:4d}] "
+                        f"Action: {action_name:12s} | "
+                        f"Reward: {reward:7.3f} | "
+                        f"Total: {episode_reward:7.3f}"
+                    )
                 
                 # 렌더링
                 if render and hasattr(self.env, 'render'):

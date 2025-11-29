@@ -1,549 +1,219 @@
 #!/usr/bin/env python3
 """
-Supervised Learning (Teacher Forcing)을 사용한 사전 학습
-사람이 직접 조작한 데이터로 모델을 supervised learning으로 사전 학습한 후 강화학습으로 fine-tuning
-
-Teacher Forcing = Supervised Learning:
-- 사람이 조작한 (상태, 액션) 쌍을 사용
-- Maximum Likelihood Estimation (MLE)으로 정책 학습
-- 실제 액션의 로그 확률을 최대화하는 방식
-
-사용법:
-    # 1단계: Supervised Learning 사전 학습
-    python train_with_teacher_forcing.py --demos human_demos.pkl --pretrain-epochs 100
-    
-    # 2단계: 강화학습으로 fine-tuning
-    python train_with_teacher_forcing.py --demos human_demos.pkl --pretrain-epochs 100 --rl-steps 100000
+TRM-DQN Teacher Forcing + Offline Q-learning
 """
 
 import argparse
+import os
+import pickle
+from datetime import datetime
+from typing import List
+
 import numpy as np
 import torch
-import torch.nn as nn
-import torch.optim as optim
-import pickle
-import os
-import sys
-from datetime import datetime, timedelta
-from collections import deque
-import time
 
-# 환경 및 에이전트 임포트
-from rc_car_sim_env import RCCarSimEnv
-from car_racing_env import CarRacingEnvWrapper
-from ppo_agent import PPOAgent
-from train_ppo import train_ppo
+from ppo_agent import DQNAgent
 
-# TensorBoard 지원
 try:
     from torch.utils.tensorboard import SummaryWriter
+
     HAS_TENSORBOARD = True
 except ImportError:
     HAS_TENSORBOARD = False
-    print("⚠️  TensorBoard 미설치 - pip install tensorboard 로 설치하면 실시간 모니터링 가능")
+
+
+def load_demonstrations(path: str) -> List[dict]:
+    with open(path, "rb") as f:
+        data = pickle.load(f)
+    return data.get("demonstrations", data)
 
 
 class TeacherForcingTrainer:
-    """
-    Supervised Learning (Teacher Forcing)을 사용한 사전 학습 클래스
-    사람이 직접 조작한 (상태, 액션) 쌍으로 정책을 supervised learning으로 학습
-    
-    학습 방식:
-    - Maximum Likelihood Estimation (MLE)
-    - Loss = -log P(실제_액션 | 상태)
-    - 실제 액션의 로그 확률을 최대화
-    """
-    
     def __init__(
         self,
-        agent: PPOAgent,
-        demonstrations: list,
-        device: str = 'cuda',
-        lr: float = 3e-4
+        agent: DQNAgent,
+        demonstrations: List[dict],
+        device: str = "cpu",
+        lr: float = 3e-4,
     ):
-        """
-        Args:
-            agent: PPO 에이전트
-            demonstrations: 수집된 데모 데이터 리스트
-            device: 디바이스
-            lr: 학습률
-        """
         self.agent = agent
-        self.device = device
+        self.device = torch.device(device)
         self.demonstrations = demonstrations
-        
-        # 옵티마이저 (Actor만 학습)
-        self.optimizer = optim.Adam(
-            self.agent.actor_critic.parameters(),
-            lr=lr
+        if lr is not None:
+            for group in self.agent.optimizer.param_groups:
+                group["lr"] = lr
+
+        (
+            self.states,
+            self.actions,
+            self.next_states,
+            self.rewards,
+            self.dones,
+        ) = self._prepare_data(demonstrations)
+
+    def _prepare_data(self, demos):
+        states = []
+        actions = []
+        next_states = []
+        rewards = []
+        dones = []
+
+        for episode in demos:
+            ep_states = episode.get("states", [])
+            ep_actions = episode.get("actions", [])
+            ep_rewards = episode.get("rewards", [])
+            ep_dones = episode.get("dones", [])
+
+            if len(ep_states) == 0 or len(ep_actions) == 0:
+                continue
+
+            for idx in range(len(ep_actions)):
+                state = ep_states[idx]
+                next_state = ep_states[idx + 1] if idx + 1 < len(ep_states) else state
+
+                state = state.astype(np.float32).reshape(-1)
+                next_state = next_state.astype(np.float32).reshape(-1)
+                if state.max() > 1.0:
+                    state = state / 255.0
+                if next_state.max() > 1.0:
+                    next_state = next_state / 255.0
+
+                states.append(state)
+                next_states.append(next_state)
+                actions.append(int(ep_actions[idx]))
+                rewards.append(float(ep_rewards[idx] if idx < len(ep_rewards) else 0.0))
+                dones.append(float(ep_dones[idx] if idx < len(ep_dones) else 0.0))
+
+        if len(states) == 0:
+            raise ValueError("데모 데이터에 유효한 (state, action) 쌍이 없습니다.")
+
+        return (
+            np.array(states, dtype=np.float32),
+            np.array(actions, dtype=np.int64),
+            np.array(next_states, dtype=np.float32),
+            np.array(rewards, dtype=np.float32),
+            np.array(dones, dtype=np.float32),
         )
-        
-        # 데이터 준비
-        self.states, self.actions = self._prepare_data()
-        
-        print(f"✅ Teacher Forcing 데이터 준비 완료")
-        print(f"   총 상태 수: {len(self.states)}")
-        print(f"   총 액션 수: {len(self.actions)}")
-    
-    def _prepare_data(self):
-        """데모 데이터를 학습용으로 변환 (에피소드 구조 유지)"""
-        # 에피소드 구조를 유지하여 시퀀스 정보 보존
-        self.episodes = []
-        for episode in self.demonstrations:
-            states = episode.get('states', [])
-            actions = episode.get('actions', [])
-            if len(states) > 0 and len(actions) > 0:
-                # 길이 맞추기
-                min_len = min(len(states), len(actions))
-                self.episodes.append({
-                    'states': np.array(states[:min_len]),
-                    'actions': np.array(actions[:min_len])
-                })
-        
-        # 기존 방식 호환성을 위한 평탄화된 데이터도 유지
-        all_states = []
-        all_actions = []
-        for episode in self.episodes:
-            for state, action in zip(episode['states'], episode['actions']):
-                all_states.append(state)
-                all_actions.append(action)
-        
-        return np.array(all_states), np.array(all_actions)
-    
-    def train_epoch(self, batch_size: int = 64, verbose: bool = False):
-        """
-        단일 에폭 학습 (에피소드 단위로 latent carry-over 지원)
-        
-        Args:
-            batch_size: 배치 크기
-            verbose: 상세 출력 여부
-        
-        Returns:
-            loss: 평균 손실
-            accuracy: 정확도 (일치율)
-        """
-        total_loss = 0.0
-        num_batches = 0
-        correct_predictions = 0
-        total_predictions = 0
-        
-        use_recurrent = getattr(self.agent, 'use_recurrent', False)
-        
-        # 에피소드 단위로 처리 (latent carry-over를 위해)
-        episode_indices = list(range(len(self.episodes)))
-        np.random.shuffle(episode_indices)
-        
-        for ep_idx in episode_indices:
-            episode = self.episodes[ep_idx]
-            states = episode['states']
-            actions = episode['actions']
-            
-            # 에피소드 내에서 배치 단위로 처리하되, latent는 carry-over
-            prev_latent = None
-            is_first_batch = True
-            
-            for i in range(0, len(states), batch_size):
-                batch_states = states[i:i+batch_size]
-                batch_actions = actions[i:i+batch_size]
-                
-                if len(batch_states) == 0:
-                    continue
-                
-                # 텐서로 변환
-                states_tensor = torch.FloatTensor(batch_states).to(self.device)
-                actions_tensor = torch.from_numpy(batch_actions).to(self.device)
-                
-                # 이산 액션 처리
-                if self.agent.actor_critic.discrete_action:
-                    actions_tensor = actions_tensor.long()
-                    if actions_tensor.dim() == 1:
-                        actions_tensor = actions_tensor.unsqueeze(-1)
-                else:
-                    actions_tensor = actions_tensor.float()
-                    if actions_tensor.dim() == 1:
-                        actions_tensor = actions_tensor.unsqueeze(-1)
-                
-                # Recurrent 모드: latent carry-over 사용
-                if use_recurrent:
-                    from ppo_agent import LatentCarry
-                    
-                    # 이전 latent가 있으면 전달
-                    if prev_latent is not None and not is_first_batch:
-                        # 배치 크기 맞추기
-                        if prev_latent.shape[0] == states_tensor.shape[0]:
-                            current_latent = prev_latent.clone()
-                        else:
-                            current_latent = prev_latent[-1:].expand(states_tensor.shape[0], -1).clone()
-                    else:
-                        current_latent = None
-                    
-                    # evaluate with latent (latent 정보 포함)
-                    log_probs, _, _ = self.agent.actor_critic.evaluate(
-                        states_tensor,
-                        actions_tensor,
-                        latent=current_latent,
-                        n_cycles=self.agent.n_cycles
-                    )
-                    
-                    # 다음 배치를 위한 latent 업데이트
-                    with torch.no_grad():
-                        carry = LatentCarry(latent=current_latent) if current_latent is not None else None
-                        _, _, _, new_carry = self.agent.actor_critic.get_action(
-                            states_tensor,
-                            carry=carry,
-                            deterministic=True,
-                            n_cycles=self.agent.n_cycles
-                        )
-                        if new_carry is not None:
-                            prev_latent = new_carry.latent.detach().clone()
-                        else:
-                            prev_latent = None
-                else:
-                    # Non-recurrent: 기존 방식
-                    log_probs, _, _ = self.agent.actor_critic.evaluate(
-                        states_tensor,
-                        actions_tensor
-                    )
-                
-                # Supervised Learning: Negative log likelihood loss
-                loss = -log_probs.mean()
-                
-                # 정확도 계산
-                with torch.no_grad():
-                    try:
-                        if use_recurrent:
-                            from ppo_agent import LatentCarry
-                            carry_for_pred = LatentCarry(latent=current_latent) if current_latent is not None else None
-                            predicted_actions, _, _, _ = self.agent.actor_critic.get_action(
-                                states_tensor, carry=carry_for_pred, deterministic=True, n_cycles=self.agent.n_cycles
-                            )
-                        else:
-                            predicted_actions, _, _ = self.agent.actor_critic.get_action(
-                                states_tensor, deterministic=True
-                            )
-                        
-                        if self.agent.actor_critic.discrete_action:
-                            predicted_actions = predicted_actions.cpu().numpy().flatten()
-                            actual_actions = batch_actions.flatten()
-                            correct_predictions += np.sum(predicted_actions == actual_actions)
-                            total_predictions += len(actual_actions)
-                    except Exception:
-                        pass
-                
-                # 역전파
-                self.optimizer.zero_grad()
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.agent.actor_critic.parameters(), 0.5)
-                self.optimizer.step()
-                
-                total_loss += loss.item()
-                num_batches += 1
-                is_first_batch = False
-        
-        avg_loss = total_loss / num_batches if num_batches > 0 else 0.0
-        accuracy = correct_predictions / total_predictions if total_predictions > 0 else 0.0
-        
-        if verbose:
-            print()  # 줄바꿈
-        
-        return avg_loss, accuracy
-    
+
     def pretrain(
         self,
-        epochs: int = 100,
+        epochs: int = 50,
         batch_size: int = 64,
-        save_path: str = 'pretrained_model.pth',
-        log_dir: str = 'runs',
-        verbose: bool = True
+        save_path: str = "trained_models/pretrained_dqn.pth",
+        log_dir: str = "runs",
+        verbose: bool = True,
     ):
-        """
-        Supervised Learning (Teacher Forcing) 사전 학습
-        
-        사람이 조작한 (상태, 액션) 쌍을 사용하여 정책을 supervised learning으로 학습
-        
-        Args:
-            epochs: 학습 에폭 수
-            batch_size: 배치 크기
-            save_path: 모델 저장 경로
-            log_dir: TensorBoard 로그 디렉토리
-            verbose: 상세 출력 여부
-        
-        Returns:
-            final_loss: 최종 손실
-        """
-        print(f"\n{'='*60}")
-        print("Supervised Learning (Teacher Forcing) 사전 학습 시작")
-        print(f"{'='*60}")
-        print(f"에폭 수: {epochs}")
-        print(f"배치 크기: {batch_size}")
-        print(f"데이터 크기: {len(self.states):,}개 샘플")
-        print(f"총 배치 수: {(len(self.states) + batch_size - 1) // batch_size}개/에폭")
-        print(f"{'='*60}\n")
-        
-        # TensorBoard 설정
         writer = None
         if HAS_TENSORBOARD:
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            log_path = os.path.join(log_dir, f"teacher_forcing_{timestamp}")
-            writer = SummaryWriter(log_path)
-            print(f"📊 TensorBoard 로그: {log_path}")
-            print(f"   실행: tensorboard --logdir={log_dir}\n")
-        
-        # 시간 측정
-        start_time = time.time()
-        epoch_start_time = time.time()
-        
-        best_loss = float('inf')
-        best_accuracy = 0.0
-        
-        for epoch in range(epochs):
-            # 학습
-            loss, accuracy = self.train_epoch(batch_size, verbose=verbose)
-            
-            # 시간 계산
-            epoch_time = time.time() - epoch_start_time
-            epoch_start_time = time.time()
-            elapsed_total = time.time() - start_time
-            
-            if epoch > 0:
-                avg_epoch_time = elapsed_total / (epoch + 1)
-                remaining_epochs = epochs - epoch - 1
-                eta_seconds = avg_epoch_time * remaining_epochs
-                eta_str = str(timedelta(seconds=int(eta_seconds)))
-            else:
-                eta_str = "계산 중..."
-            
-            # 로깅 (매 에포크마다 출력)
+            writer = SummaryWriter(
+                os.path.join(log_dir, f"teacher_forcing_{datetime.now():%Y%m%d_%H%M%S}")
+            )
+
+        num_samples = len(self.states)
+        for epoch in range(1, epochs + 1):
+            perm = np.random.permutation(num_samples)
+            epoch_loss = 0
+            total = 0
+            correct = 0
+
+            for start in range(0, num_samples, batch_size):
+                idx = perm[start : start + batch_size]
+                batch_states = self.states[idx]
+                batch_actions = self.actions[idx]
+
+                loss = self.agent.supervised_step(batch_states, batch_actions)
+                epoch_loss += loss * len(idx)
+                total += len(idx)
+
+                q_values = self.agent.predict(batch_states)
+                preds = np.argmax(q_values, axis=1)
+                correct += np.sum(preds == batch_actions)
+
+            avg_loss = epoch_loss / max(total, 1)
+            accuracy = correct / max(total, 1)
             if verbose:
-                epoch_progress = (epoch + 1) / epochs * 100
-                print(f"[에포크 {epoch+1}/{epochs}] ({epoch_progress:.1f}%) | "
-                      f"Loss: {loss:.6f} | "
-                      f"Accuracy: {accuracy:.2%} | "
-                      f"시간: {epoch_time:.1f}초 | "
-                      f"예상 남은: {eta_str}")
-            
+                print(
+                    f"[Pretrain {epoch}/{epochs}] Loss: {avg_loss:.4f} | Acc: {accuracy*100:.2f}%"
+                )
             if writer:
-                writer.add_scalar('Train/Loss', loss, epoch)
-                writer.add_scalar('Train/Accuracy', accuracy, epoch)
-            
-            # 최고 모델 저장
-            if loss < best_loss:
-                best_loss = loss
-                best_accuracy = accuracy
-                self.agent.save(save_path)
-                if verbose:
-                    print(f"  💾 최고 모델 저장: {save_path} (Loss: {loss:.6f}, Acc: {accuracy:.2%})")
-        
+                writer.add_scalar("Pretrain/Loss", avg_loss, epoch)
+                writer.add_scalar("Pretrain/Accuracy", accuracy, epoch)
+
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        self.agent.save(save_path)
         if writer:
             writer.close()
-        
-        total_time = time.time() - start_time
-        
-        print(f"\n{'='*60}")
-        print("✅ Supervised Learning (Teacher Forcing) 사전 학습 완료")
-        print(f"{'='*60}")
-        print(f"최종 손실: {best_loss:.6f}")
-        print(f"최종 정확도: {best_accuracy:.2%}")
-        print(f"총 학습 시간: {str(timedelta(seconds=int(total_time)))}")
-        print(f"평균 에포크 시간: {total_time/epochs:.1f}초")
-        print(f"모델 저장: {save_path}")
-        print(f"{'='*60}\n")
-        
-        return best_loss
+        print(f"사전 학습 모델 저장: {save_path}")
 
+    def offline_q_learning(self, steps: int = 10_000):
+        transitions = list(
+            zip(
+                self.states,
+                self.actions,
+                self.rewards,
+                self.next_states,
+                self.dones,
+            )
+        )
+        for state, action, reward, next_state, done in transitions:
+            self.agent.store_transition(state, action, reward, next_state, done)
 
-def load_demonstrations(filepath: str):
-    """
-    저장된 데모 데이터 로드
-    
-    Args:
-        filepath: 데모 데이터 파일 경로
-    
-    Returns:
-        data: 로드된 데이터 (metadata, demonstrations)
-    """
-    with open(filepath, 'rb') as f:
-        data = pickle.load(f)
-    
-    print(f"✅ 데모 데이터 로드 완료: {filepath}")
-    print(f"   에피소드 수: {data['metadata']['num_episodes']}")
-    print(f"   총 스텝 수: {data['metadata']['total_steps']}")
-    print(f"   환경 타입: {data['metadata']['env_type']}")
-    
-    return data
+        for step in range(steps):
+            info = self.agent.update()
+            if info and step % 1000 == 0:
+                print(
+                    f"[Offline Q] Step {step}/{steps} | Loss: {info['loss']:.4f} | TD: {info['td_error']:.4f}"
+                )
 
 
 def main():
-    """메인 함수"""
-    parser = argparse.ArgumentParser(
-        description='Supervised Learning (Teacher Forcing)을 사용한 사전 학습 및 강화학습',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-사용 예시:
-  # 1단계: Supervised Learning 사전 학습만
-  python train_with_teacher_forcing.py --demos human_demos.pkl --pretrain-epochs 100
-  
-  # 2단계: 사전 학습 + 강화학습 fine-tuning
-  python train_with_teacher_forcing.py --demos human_demos.pkl --pretrain-epochs 100 --rl-steps 100000
-  
-  # 3단계: 기존 사전 학습 모델로 강화학습만
-  python train_with_teacher_forcing.py --load pretrained_model.pth --rl-steps 100000
-        """
+    parser = argparse.ArgumentParser(description="TRM-DQN Teacher Forcing")
+    parser.add_argument("--demos", type=str, required=True)
+    parser.add_argument("--pretrain-epochs", type=int, default=50)
+    parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument("--learning-rate", type=float, default=3e-4)
+    parser.add_argument(
+        "--save-path", type=str, default="trained_models/pretrained_dqn.pth"
     )
-    
-    # 데이터 설정
-    parser.add_argument('--demos', type=str, default=None,
-                        help='데모 데이터 파일 경로 (pickle 형식)')
-    parser.add_argument('--load', type=str, default=None,
-                        help='사전 학습된 모델 경로 (사전 학습 생략 시)')
-    
-    # Supervised Learning (Teacher Forcing) 설정
-    parser.add_argument('--pretrain-epochs', type=int, default=0,
-                        help='Supervised Learning 사전 학습 에폭 수 (0이면 생략)')
-    parser.add_argument('--pretrain-batch-size', type=int, default=64,
-                        help='사전 학습 배치 크기 (기본: 64)')
-    parser.add_argument('--pretrain-lr', type=float, default=3e-4,
-                        help='사전 학습 학습률 (기본: 3e-4)')
-    parser.add_argument('--pretrain-save', type=str, default='pretrained_model.pth',
-                        help='사전 학습 모델 저장 경로 (기본: pretrained_model.pth)')
-    
-    # 강화학습 설정
-    parser.add_argument('--rl-steps', type=int, default=0,
-                        help='강화학습 스텝 수 (0이면 생략)')
-    parser.add_argument('--rl-env-type', choices=['carracing', 'sim', 'real'],
-                        default='carracing',
-                        help='강화학습 환경 타입 (기본: carracing)')
-    parser.add_argument('--rl-port', type=str, default='/dev/ttyACM0',
-                        help='시리얼 포트 (real 모드 사용 시)')
-    parser.add_argument('--rl-save', type=str, default='ppo_model.pth',
-                        help='강화학습 모델 저장 경로 (기본: ppo_model.pth)')
-    
-    # 네트워크 파라미터
-    parser.add_argument('--hidden-dim', type=int, default=256,
-                        help='히든 레이어 차원 (기본: 256)')
-    parser.add_argument('--latent-dim', type=int, default=256,
-                        help='TRM-PPO 잠재 상태 차원 (기본: 256)')
-    parser.add_argument('--n-cycles', type=int, default=4,
-                        help='TRM-PPO 재귀 추론 반복 횟수 (기본: 4)')
-    
-    # 디바이스
-    parser.add_argument('--device', type=str, default=None,
-                        help='디바이스 (cuda/cpu, 기본: 자동 선택)')
-    
+    parser.add_argument("--offline-steps", type=int, default=0)
+    parser.add_argument("--state-dim", type=int, default=784)
+    parser.add_argument("--action-dim", type=int, default=5)
+    parser.add_argument(
+        "--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu"
+    )
+    parser.add_argument("--hidden-dim", type=int, default=256)
+    parser.add_argument("--latent-dim", type=int, default=256)
+    parser.add_argument("--n-deep-loops", type=int, default=2)
+    parser.add_argument("--n-latent-loops", type=int, default=2)
+    parser.add_argument("--log-dir", type=str, default="runs")
+    parser.add_argument("--verbose", action="store_true", default=True)
     args = parser.parse_args()
-    
-    # 디바이스 설정
-    if args.device is None:
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    else:
-        device = args.device
-    
-    print(f"사용 디바이스: {device}")
-    
-    # 에이전트 생성
-    agent = PPOAgent(
-        state_dim=256,
-        action_dim=5,  # 이산 액션
-        latent_dim=args.latent_dim,
+
+    demos = load_demonstrations(args.demos)
+    agent = DQNAgent(
+        state_dim=args.state_dim,
+        action_dim=args.action_dim,
         hidden_dim=args.hidden_dim,
-        n_cycles=args.n_cycles,
-        carry_latent=True,
-        device=device,
-        discrete_action=True,
-        num_discrete_actions=5,
-        use_recurrent=True
+        latent_dim=args.latent_dim,
+        lr=args.learning_rate,
+        device=args.device,
+        n_deep_loops=args.n_deep_loops,
+        n_latent_loops=args.n_latent_loops,
     )
-    
-    # 기존 모델 로드 (있는 경우)
-    if args.load:
-        if os.path.exists(args.load):
-            agent.load(args.load)
-            print(f"✅ 모델 로드 완료: {args.load}")
-        else:
-            print(f"⚠️  모델 파일을 찾을 수 없습니다: {args.load}")
-    
-    # Supervised Learning (Teacher Forcing) 사전 학습
-    if args.pretrain_epochs > 0:
-        if args.demos is None:
-            print("❌ Supervised Learning을 사용하려면 --demos 옵션이 필요합니다.")
-            sys.exit(1)
-        
-        if not os.path.exists(args.demos):
-            print(f"❌ 데모 데이터 파일을 찾을 수 없습니다: {args.demos}")
-            sys.exit(1)
-        
-        # 데모 데이터 로드
-        demo_data = load_demonstrations(args.demos)
-        demonstrations = demo_data['demonstrations']
-        
-        # Supervised Learning 학습
-        trainer = TeacherForcingTrainer(
-            agent=agent,
-            demonstrations=demonstrations,
-            device=device,
-            lr=args.pretrain_lr
-        )
-        
-        trainer.pretrain(
-            epochs=args.pretrain_epochs,
-            batch_size=args.pretrain_batch_size,
-            save_path=args.pretrain_save,
-            verbose=True
-        )
-    
-    # 강화학습 fine-tuning
-    if args.rl_steps > 0:
-        print(f"\n{'='*60}")
-        print("강화학습 Fine-tuning 시작")
-        print(f"{'='*60}\n")
-        
-        # 환경 생성
-        if args.rl_env_type == 'carracing':
-            try:
-                env = CarRacingEnvWrapper(
-                    max_steps=1000,
-                    use_extended_actions=True,
-                    use_discrete_actions=True
-                )
-            except ImportError as e:
-                print(f"❌ CarRacing 환경을 사용할 수 없습니다: {e}")
-                sys.exit(1)
-        elif args.rl_env_type == 'sim':
-            env = RCCarSimEnv(
-                max_steps=1000,
-                use_extended_actions=True,
-                use_discrete_actions=True
-            )
-        else:  # real
-            try:
-                from rc_car_env import RCCarEnv
-                env = RCCarEnv(
-                    max_steps=1000,
-                    use_extended_actions=True,
-                    use_discrete_actions=True
-                )
-            except ImportError:
-                print("❌ 실제 하드웨어 환경을 사용할 수 없습니다.")
-                sys.exit(1)
-        
-        # 강화학습 실행
-        train_ppo(
-            env=env,
-            agent=agent,
-            total_steps=args.rl_steps,
-            max_episode_steps=1000,
-            update_frequency=2048,
-            update_epochs=10,
-            save_frequency=10000,
-            save_path=args.rl_save,
-            use_tensorboard=True,
-            log_dir='runs',
-            mc_update_on_done=False
-        )
-        
-        env.close()
-    
-    print("\n✅ 모든 학습 완료!")
+
+    trainer = TeacherForcingTrainer(
+        agent, demos, device=args.device, lr=args.learning_rate
+    )
+    trainer.pretrain(
+        epochs=args.pretrain_epochs,
+        batch_size=args.batch_size,
+        save_path=args.save_path,
+        log_dir=args.log_dir,
+        verbose=args.verbose,
+    )
+
+    if args.offline_steps > 0:
+        trainer.offline_q_learning(steps=args.offline_steps)
 
 
 if __name__ == "__main__":
