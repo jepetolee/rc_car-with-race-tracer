@@ -291,6 +291,17 @@ sudo usermod -a -G video $USER
 - Install picamera2: `sudo apt install python3-picamera2`
 - Ensure camera is enabled: `sudo raspi-config` > Interface Options > Camera > Enable
 
+## 📚 학습 가이드
+
+**통합 학습 파이프라인 가이드**: 전체 학습 과정을 통합한 상세 가이드는 [`README_TRAINING_PIPELINE.md`](README_TRAINING_PIPELINE.md)를 참고하세요.
+
+- 모든 학습 방법 통합 (A3C, PPO, Teacher Forcing, Imitation RL, Human Feedback)
+- 권장 학습 파이프라인
+- 단계별 실행 예시
+- 서버-클라이언트 학습 방법
+
+---
+
 ## 모델 사전학습 (Pretraining)
 
 ### 개요

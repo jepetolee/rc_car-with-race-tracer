@@ -549,6 +549,25 @@ def train_imitation_rl_api():
                 'available_files': available_files[:10]  # 최대 10개만 표시
             }), 400
         
+        # model_path가 제공되지 않으면 기본값으로 a3c_model_best.pth 사용
+        if not model_path:
+            default_model = 'a3c_model_best.pth'
+            # 프로젝트 루트와 MODEL_FOLDER 둘 다 확인
+            if os.path.exists(default_model):
+                model_path = default_model
+            elif os.path.exists(os.path.join(MODEL_FOLDER, default_model)):
+                model_path = os.path.join(MODEL_FOLDER, default_model)
+            else:
+                print(f"⚠️  기본 모델({default_model})을 찾을 수 없습니다. 랜덤 초기화로 시작합니다.")
+                model_path = None
+        
+        if model_path:
+            print(f"   사전 학습 모델: {model_path}")
+            if not os.path.exists(model_path):
+                print(f"⚠️  모델 파일이 존재하지 않습니다: {model_path}")
+                print(f"   랜덤 초기화로 시작합니다.")
+                model_path = None
+        
         # 디바이스 선택 (GPU 사용 가능하면 cuda, 아니면 cpu)
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
         print(f"   디바이스: {device}")

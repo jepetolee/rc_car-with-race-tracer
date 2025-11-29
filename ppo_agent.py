@@ -283,6 +283,14 @@ class RecurrentActorCritic(nn.Module):
             latent = self.init_latent.unsqueeze(0).expand(batch_size, -1).clone()
         else:
             latent = carry.latent
+            # 배치 크기 확인 및 조정
+            if latent.shape[0] != batch_size:
+                if latent.shape[0] == 1:
+                    # 단일 latent를 배치 크기만큼 expand
+                    latent = latent.expand(batch_size, -1)
+                else:
+                    # 배치 크기가 다르면 마지막 latent를 expand
+                    latent = latent[-1:].expand(batch_size, -1)
             
         # Deep Recursion (T times) & Latent Recursion (N times) - One Pass
         next_latent, latent_grad, value, action_output = self.deep_recursion(
