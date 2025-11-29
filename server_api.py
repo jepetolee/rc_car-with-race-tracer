@@ -9,6 +9,7 @@ import pickle
 import argparse
 import uuid
 import numpy as np
+import traceback
 from datetime import datetime
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
@@ -513,44 +514,97 @@ def train_supervised():
         else:
             return jsonify({'error': 'Could not determine action_dim from demonstrations'}), 400
         
-        # 에이전트 생성
+        # A3C 모델과 호환되도록 recurrent 구조 사용
+        # run_a3c.sh에서 --use-recurrent로 학습했으므로 동일한 구조 필요
         agent = PPOAgent(
             state_dim=state_dim,
             action_dim=action_dim,
             discrete_action=True,
-            use_recurrent=False
+            use_recurrent=True,  # A3C 모델과 호환
+            latent_dim=256,      # A3C 기본값
+            n_cycles=4,          # A3C 기본값
+            hidden_dim=256       # A3C 기본값
         )
+        loaded_model_path = None
+
+        def attempt_model_load(path, label):
+            nonlocal loaded_model_path
+            try:
+                agent.load(path)
+                loaded_model_path = path
+                print(f"✅ {label} 모델 로드 완료: {path}")
+                return True
+            except Exception as load_err:
+                error_msg = str(load_err)
+                # 에러 메시지가 너무 길면 요약
+                if len(error_msg) > 500:
+                    error_msg = error_msg[:500] + "... (truncated)"
+                print(f"⚠️ {label} 모델 로드 실패({path})")
+                print(f"   이유: 모델 구조가 호환되지 않습니다 (TRM 모델 vs 일반 모델).")
+                print(f"   랜덤 초기화로 계속 진행합니다.")
+                return False
         
         # 사전 학습된 모델 로드 (선택)
-        if model_path:
-            if not os.path.isabs(model_path):
-                # 상대 경로인 경우 프로젝트 루트 또는 MODEL_FOLDER 확인
-                if os.path.exists(model_path):
-                    pass
-                elif os.path.exists(os.path.join(MODEL_FOLDER, model_path)):
-                    model_path = os.path.join(MODEL_FOLDER, model_path)
+        try:
+            # model_path 처리 (상대 경로인 경우 여러 위치 확인)
+            if model_path:
+                # 상대 경로인 경우 프로젝트 루트, MODEL_FOLDER, 현재 디렉토리 확인
+                if not os.path.isabs(model_path):
+                    # 여러 가능한 경로 확인
+                    possible_paths = [
+                        model_path,  # 현재 디렉토리 기준
+                        os.path.join(MODEL_FOLDER, model_path),  # MODEL_FOLDER 기준
+                        os.path.join(MODEL_FOLDER, os.path.basename(model_path)),  # 파일명만 사용
+                        os.path.join('.', model_path),  # 현재 디렉토리 명시
+                    ]
+                    
+                    found = False
+                    for candidate in possible_paths:
+                        if os.path.exists(candidate):
+                            model_path = candidate
+                            found = True
+                            break
+                    
+                    if not found:
+                        print(f"⚠️  지정된 모델 파일을 찾을 수 없습니다: {model_path}")
+                        print(f"   시도한 경로들: {possible_paths}")
+                        model_path = None
             
-            if os.path.exists(model_path):
-                print(f"📥 사전 학습된 모델 로드: {model_path}")
-                agent.load(model_path)
-                print(f"✅ 모델 로드 완료")
+            # model_path가 제공되지 않으면 기본값으로 a3c_model_best.pth 사용
+            if not model_path:
+                default_model = 'a3c_model_best.pth'
+                default_paths = [
+                    default_model,
+                    os.path.join(MODEL_FOLDER, default_model)
+                ]
+                loaded = False
+                for candidate in default_paths:
+                    if candidate and os.path.exists(candidate):
+                        print(f"📥 기본 모델 로드 시도: {candidate}")
+                        loaded = attempt_model_load(candidate, "기본")
+                        if loaded:
+                            model_path = candidate  # 로드 성공한 경로 저장
+                            break
+                if not loaded:
+                    print(f"⚠️  기본 모델({default_model})을 찾을 수 없습니다. 랜덤 초기화로 시작합니다.")
+                    model_path = None
             else:
-                print(f"⚠️  모델 파일을 찾을 수 없습니다: {model_path}")
-                print(f"   랜덤 초기화로 시작합니다.")
-        else:
-            # 기본 모델 확인
-            default_model = 'a3c_model_best.pth'
-            if os.path.exists(default_model):
-                print(f"📥 기본 모델 로드: {default_model}")
-                agent.load(default_model)
-                print(f"✅ 모델 로드 완료")
-            elif os.path.exists(os.path.join(MODEL_FOLDER, default_model)):
-                model_path = os.path.join(MODEL_FOLDER, default_model)
-                print(f"📥 기본 모델 로드: {model_path}")
-                agent.load(model_path)
-                print(f"✅ 모델 로드 완료")
-            else:
-                print(f"⚠️  기본 모델을 찾을 수 없습니다. 랜덤 초기화로 시작합니다.")
+                # 지정된 모델 로드 시도
+                if os.path.exists(model_path):
+                    print(f"📥 지정된 모델 로드 시도: {model_path}")
+                    loaded = attempt_model_load(model_path, "지정된")
+                    if not loaded:
+                        print(f"⚠️  지정된 모델 로드 실패. 랜덤 초기화로 시작합니다.")
+                        model_path = None
+                else:
+                    print(f"⚠️  모델 파일이 존재하지 않습니다: {model_path}")
+                    print(f"   랜덤 초기화로 시작합니다.")
+                    model_path = None
+        except Exception as model_load_error:
+            # 모델 로드 과정에서 예상치 못한 오류가 발생해도 계속 진행
+            print(f"⚠️  모델 로드 과정에서 오류 발생: {model_load_error}")
+            print(f"   랜덤 초기화로 계속 진행합니다.")
+            model_path = None
         
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
         print(f"디바이스: {device}")
@@ -570,7 +624,8 @@ def train_supervised():
             'status': 'success',
             'model_path': model_path,
             'epochs': epochs,
-            'state_dim': state_dim
+            'state_dim': state_dim,
+            'loaded_model': loaded_model_path
         })
     
     except Exception as e:
@@ -648,6 +703,30 @@ def train_imitation_rl_api():
                 'available_files': available_files[:10]  # 최대 10개만 표시
             }), 400
         
+        # model_path 처리 (상대 경로인 경우 여러 위치 확인)
+        if model_path:
+            # 상대 경로인 경우 프로젝트 루트, MODEL_FOLDER, 현재 디렉토리 확인
+            if not os.path.isabs(model_path):
+                # 여러 가능한 경로 확인
+                possible_paths = [
+                    model_path,  # 현재 디렉토리 기준
+                    os.path.join(MODEL_FOLDER, model_path),  # MODEL_FOLDER 기준
+                    os.path.join(MODEL_FOLDER, os.path.basename(model_path)),  # 파일명만 사용
+                    os.path.join('.', model_path),  # 현재 디렉토리 명시
+                ]
+                
+                found = False
+                for candidate in possible_paths:
+                    if os.path.exists(candidate):
+                        model_path = candidate
+                        found = True
+                        break
+                
+                if not found:
+                    print(f"⚠️  지정된 모델 파일을 찾을 수 없습니다: {model_path}")
+                    print(f"   시도한 경로들: {possible_paths}")
+                    model_path = None
+        
         # model_path가 제공되지 않으면 기본값으로 a3c_model_best.pth 사용
         if not model_path:
             default_model = 'a3c_model_best.pth'
@@ -660,12 +739,15 @@ def train_imitation_rl_api():
                 print(f"⚠️  기본 모델({default_model})을 찾을 수 없습니다. 랜덤 초기화로 시작합니다.")
                 model_path = None
         
+        # model_path 최종 확인 및 로그 출력
         if model_path:
             print(f"   사전 학습 모델: {model_path}")
             if not os.path.exists(model_path):
                 print(f"⚠️  모델 파일이 존재하지 않습니다: {model_path}")
                 print(f"   랜덤 초기화로 시작합니다.")
                 model_path = None
+        else:
+            print(f"   사전 학습 모델: 없음 (랜덤 초기화)")
         
         # 디바이스 선택 (GPU 사용 가능하면 cuda, 아니면 cpu)
         device = 'cuda' if torch.cuda.is_available() else 'cpu'

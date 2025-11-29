@@ -86,16 +86,25 @@ class TeacherForcingTrainer:
         print(f"   총 액션 수: {len(self.actions)}")
     
     def _prepare_data(self):
-        """데모 데이터를 학습용으로 변환"""
+        """데모 데이터를 학습용으로 변환 (에피소드 구조 유지)"""
+        # 에피소드 구조를 유지하여 시퀀스 정보 보존
+        self.episodes = []
+        for episode in self.demonstrations:
+            states = episode.get('states', [])
+            actions = episode.get('actions', [])
+            if len(states) > 0 and len(actions) > 0:
+                # 길이 맞추기
+                min_len = min(len(states), len(actions))
+                self.episodes.append({
+                    'states': np.array(states[:min_len]),
+                    'actions': np.array(actions[:min_len])
+                })
+        
+        # 기존 방식 호환성을 위한 평탄화된 데이터도 유지
         all_states = []
         all_actions = []
-        
-        for episode in self.demonstrations:
-            states = episode['states']
-            actions = episode['actions']
-            
-            # 상태와 액션을 텐서로 변환
-            for state, action in zip(states, actions):
+        for episode in self.episodes:
+            for state, action in zip(episode['states'], episode['actions']):
                 all_states.append(state)
                 all_actions.append(action)
         
@@ -103,7 +112,7 @@ class TeacherForcingTrainer:
     
     def train_epoch(self, batch_size: int = 64, verbose: bool = False):
         """
-        단일 에폭 학습
+        단일 에폭 학습 (에피소드 단위로 latent carry-over 지원)
         
         Args:
             batch_size: 배치 크기
@@ -118,94 +127,118 @@ class TeacherForcingTrainer:
         correct_predictions = 0
         total_predictions = 0
         
-        # 데이터 셔플
-        indices = np.random.permutation(len(self.states))
-        num_batches_total = (len(self.states) + batch_size - 1) // batch_size
+        use_recurrent = getattr(self.agent, 'use_recurrent', False)
         
-        for batch_idx, i in enumerate(range(0, len(self.states), batch_size)):
-            batch_indices = indices[i:i+batch_size]
-            batch_states = self.states[batch_indices]
-            batch_actions = self.actions[batch_indices]
+        # 에피소드 단위로 처리 (latent carry-over를 위해)
+        episode_indices = list(range(len(self.episodes)))
+        np.random.shuffle(episode_indices)
+        
+        for ep_idx in episode_indices:
+            episode = self.episodes[ep_idx]
+            states = episode['states']
+            actions = episode['actions']
             
-            # 텐서로 변환
-            states_tensor = torch.FloatTensor(batch_states).to(self.device)
-            # 액션은 나중에 discrete/continuous에 따라 변환
-            actions_tensor = torch.from_numpy(batch_actions).to(self.device)
+            # 에피소드 내에서 배치 단위로 처리하되, latent는 carry-over
+            prev_latent = None
+            is_first_batch = True
             
-            # TRM-PPO 모드 확인
-            use_recurrent = getattr(self.agent, 'use_recurrent', False)
-            
-            # 이산 액션 처리
-            if self.agent.actor_critic.discrete_action:
-                # 이산 액션: LongTensor로 변환
-                actions_tensor = actions_tensor.long()
-                if actions_tensor.dim() == 1:
-                    actions_tensor = actions_tensor.unsqueeze(-1)
-            else:
-                # 연속 액션: FloatTensor로 변환
-                actions_tensor = actions_tensor.float()
-                if actions_tensor.dim() == 1:
-                    actions_tensor = actions_tensor.unsqueeze(-1)
-            
-            # 정책 네트워크로 액션 확률 계산
-            if use_recurrent:
-                # TRM-PPO: evaluate 사용
-                log_probs, _, _ = self.agent.actor_critic.evaluate(
-                    states_tensor,
-                    actions_tensor,
-                    n_cycles=self.agent.n_cycles
-                )
-            else:
-                # 기존 PPO
-                log_probs, _, _ = self.agent.actor_critic.evaluate(
-                    states_tensor,
-                    actions_tensor
-                )
-            
-            # Supervised Learning: Negative log likelihood loss (최대 우도 추정)
-            # 사람이 조작한 실제 액션의 로그 확률을 최대화
-            # Loss = -log P(실제_액션 | 상태) → 최소화하면 P(실제_액션 | 상태) 최대화
-            loss = -log_probs.mean()
-            
-            # 정확도 계산 (예측 액션과 실제 액션 비교)
-            with torch.no_grad():
-                try:
-                    if use_recurrent:
-                        # RecurrentActorCritic.get_action은 4개 값을 반환
-                        predicted_actions, _, _, _ = self.agent.actor_critic.get_action(
-                            states_tensor, deterministic=True
-                        )
-                    else:
-                        # ActorCritic.get_action은 3개 값을 반환
-                        predicted_actions, _, _ = self.agent.actor_critic.get_action(
-                            states_tensor, deterministic=True
-                        )
+            for i in range(0, len(states), batch_size):
+                batch_states = states[i:i+batch_size]
+                batch_actions = actions[i:i+batch_size]
+                
+                if len(batch_states) == 0:
+                    continue
+                
+                # 텐서로 변환
+                states_tensor = torch.FloatTensor(batch_states).to(self.device)
+                actions_tensor = torch.from_numpy(batch_actions).to(self.device)
+                
+                # 이산 액션 처리
+                if self.agent.actor_critic.discrete_action:
+                    actions_tensor = actions_tensor.long()
+                    if actions_tensor.dim() == 1:
+                        actions_tensor = actions_tensor.unsqueeze(-1)
+                else:
+                    actions_tensor = actions_tensor.float()
+                    if actions_tensor.dim() == 1:
+                        actions_tensor = actions_tensor.unsqueeze(-1)
+                
+                # Recurrent 모드: latent carry-over 사용
+                if use_recurrent:
+                    from ppo_agent import LatentCarry
                     
-                    if self.agent.actor_critic.discrete_action:
-                        predicted_actions = predicted_actions.cpu().numpy().flatten()
-                        actual_actions = batch_actions.flatten()
-                        correct_predictions += np.sum(predicted_actions == actual_actions)
-                        total_predictions += len(actual_actions)
-                except Exception:
-                    # 정확도 계산 실패 시 스킵
-                    pass
-            
-            # 역전파
-            self.optimizer.zero_grad()
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.agent.actor_critic.parameters(), 0.5)
-            self.optimizer.step()
-            
-            total_loss += loss.item()
-            num_batches += 1
-            
-            # 배치 진행 상황 출력 (verbose 모드)
-            if verbose and (batch_idx + 1) % max(1, num_batches_total // 10) == 0:
-                current_loss = total_loss / num_batches
-                current_acc = correct_predictions / total_predictions if total_predictions > 0 else 0
-                print(f"  배치 {batch_idx+1}/{num_batches_total} | "
-                      f"Loss: {current_loss:.6f} | "
-                      f"Acc: {current_acc:.1%}", end='\r', flush=True)
+                    # 이전 latent가 있으면 전달
+                    if prev_latent is not None and not is_first_batch:
+                        # 배치 크기 맞추기
+                        if prev_latent.shape[0] == states_tensor.shape[0]:
+                            current_latent = prev_latent.clone()
+                        else:
+                            current_latent = prev_latent[-1:].expand(states_tensor.shape[0], -1).clone()
+                    else:
+                        current_latent = None
+                    
+                    # evaluate with latent (latent 정보 포함)
+                    log_probs, _, _ = self.agent.actor_critic.evaluate(
+                        states_tensor,
+                        actions_tensor,
+                        latent=current_latent,
+                        n_cycles=self.agent.n_cycles
+                    )
+                    
+                    # 다음 배치를 위한 latent 업데이트
+                    with torch.no_grad():
+                        carry = LatentCarry(latent=current_latent) if current_latent is not None else None
+                        _, _, _, new_carry = self.agent.actor_critic.get_action(
+                            states_tensor,
+                            carry=carry,
+                            deterministic=True,
+                            n_cycles=self.agent.n_cycles
+                        )
+                        if new_carry is not None:
+                            prev_latent = new_carry.latent.detach().clone()
+                        else:
+                            prev_latent = None
+                else:
+                    # Non-recurrent: 기존 방식
+                    log_probs, _, _ = self.agent.actor_critic.evaluate(
+                        states_tensor,
+                        actions_tensor
+                    )
+                
+                # Supervised Learning: Negative log likelihood loss
+                loss = -log_probs.mean()
+                
+                # 정확도 계산
+                with torch.no_grad():
+                    try:
+                        if use_recurrent:
+                            from ppo_agent import LatentCarry
+                            carry_for_pred = LatentCarry(latent=current_latent) if current_latent is not None else None
+                            predicted_actions, _, _, _ = self.agent.actor_critic.get_action(
+                                states_tensor, carry=carry_for_pred, deterministic=True, n_cycles=self.agent.n_cycles
+                            )
+                        else:
+                            predicted_actions, _, _ = self.agent.actor_critic.get_action(
+                                states_tensor, deterministic=True
+                            )
+                        
+                        if self.agent.actor_critic.discrete_action:
+                            predicted_actions = predicted_actions.cpu().numpy().flatten()
+                            actual_actions = batch_actions.flatten()
+                            correct_predictions += np.sum(predicted_actions == actual_actions)
+                            total_predictions += len(actual_actions)
+                    except Exception:
+                        pass
+                
+                # 역전파
+                self.optimizer.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.agent.actor_critic.parameters(), 0.5)
+                self.optimizer.step()
+                
+                total_loss += loss.item()
+                num_batches += 1
+                is_first_batch = False
         
         avg_loss = total_loss / num_batches if num_batches > 0 else 0.0
         accuracy = correct_predictions / total_predictions if total_predictions > 0 else 0.0

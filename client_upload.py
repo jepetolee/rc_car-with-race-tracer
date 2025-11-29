@@ -463,6 +463,7 @@ def main():
         print(f"🎓 Imitation RL 학습 시작: {args.train}")
         result = client.train_imitation_rl(
             args.train,
+            model_path=args.pretrain_model,
             epochs=args.epochs,
             batch_size=args.batch_size,
             learning_rate=args.learning_rate
@@ -470,6 +471,7 @@ def main():
         if result:
             print(f"✅ 학습 완료:")
             print(f"   모델 경로: {result.get('model_path')}")
+            print(f"   최종 일치율: {result.get('final_match_rate', 0):.2%}")
     
     # Imitation RL 학습 요청
     if args.train_supervised:
