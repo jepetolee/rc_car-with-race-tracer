@@ -8,14 +8,14 @@ AF_DCMotor motor2(2);
 String command = "";
 char commandType = 'S';  // F: Forward, L: Left+Gas, R: Right+Gas, S: Stop, X: Brake
 int speedValue = 0;
-const unsigned long COMMAND_DURATION_MS = 100;  // 최소 명령 지속 시간: 100ms (0.1초)
+const unsigned long COMMAND_DURATION_MS = 300;  // 최소 명령 지속 시간: 100ms (0.1초)
 bool commandActive = false;
 unsigned long commandStartTime = 0;
 
 // 기본 속도 설정
-const int DEFAULT_SPEED = 200;
+const int DEFAULT_SPEED = 250;
 const int TURN_SPEED_HIGH = 220;
-const int TURN_SPEED_LOW = 100;
+const int TURN_SPEED_LOW = 50;
 
 void setup() {
   // 시리얼 통신 초기화
