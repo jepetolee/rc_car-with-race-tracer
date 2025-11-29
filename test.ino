@@ -29,7 +29,7 @@ void setup() {
   
   Serial.println("RC Car Ready! (CarRacing Compatible)");
   Serial.println("Actions: 0=Stop, 1=Right+Gas, 2=Left+Gas, 3=Gas, 4=Brake");
-  Serial.println("Commands: F=Forward, B=Backward, L=Left, R=Right, S=Stop, stop=Backward");
+  Serial.println("Commands: F=Forward, B=Backward, L=Left, R=Right, S=Backward, stop=Backward, X=Stop");
 }
 
 void loop() {
@@ -92,9 +92,11 @@ void loop() {
 
         executeCommand(commandType, speedValue);
 
-        if (commandType == 'S' || commandType == 'X') {
+        if (commandType == 'X') {
+          // 'X' (Brake)만 정지로 처리, 자동 정지 타이머 비활성화
           commandActive = false;
         } else {
+          // 'S' 포함 모든 명령은 지속 동작 (뒤로 가기 포함)
           commandActive = true;
           commandStartTime = millis();
         }
@@ -187,12 +189,12 @@ void executeCommand(char cmd, int speed) {
       Serial.println("Right + Gas");
       break;
       
-    case 'S':  // Stop (코스팅/정지)
-      motor1.setSpeed(0);
-      motor2.setSpeed(0);
-      motor1.run(RELEASE);
-      motor2.run(RELEASE);
-      Serial.println("Stop");
+    case 'S':  // Stop → Backward (뒤로 가기)
+      motor1.setSpeed(DEFAULT_SPEED);
+      motor2.setSpeed(DEFAULT_SPEED);
+      motor1.run(BACKWARD);
+      motor2.run(BACKWARD);
+      Serial.println("Stop -> Backward");
       break;
       
     case 'X':  // Brake → Stop (RC Car에서는 동일)

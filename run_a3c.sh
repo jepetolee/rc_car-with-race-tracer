@@ -5,7 +5,7 @@ PYTHONUNBUFFERED=1 nohup python3 train_a3c.py \
     --state-dim 784 \
     --hidden-dim 256 \
     --latent-dim 256 \
-    --max-steps 1000000 \
+    --max-steps 3000000 \
     --max-episode-steps 1000 \
     --num-workers 20 \
     --sync-interval 1000 \
