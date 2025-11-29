@@ -895,6 +895,40 @@ def list_models():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/model/download/<filename>', methods=['GET'])
+def download_model(filename):
+    """
+    특정 모델 다운로드
+    
+    Args:
+        filename: 다운로드할 모델 파일명 (예: pretrained_20251129_190816.pth)
+    
+    응답:
+        - 모델 파일 (.pth)
+    """
+    try:
+        # 보안: 경로 탐색 방지
+        if '..' in filename or '/' in filename or '\\' in filename:
+            return jsonify({'error': 'Invalid filename'}), 400
+        
+        model_path = os.path.join(MODEL_FOLDER, filename)
+        
+        if not os.path.exists(model_path):
+            return jsonify({'error': f'Model not found: {filename}'}), 404
+        
+        if not filename.endswith('.pth'):
+            return jsonify({'error': 'Invalid file type. Only .pth files are allowed'}), 400
+        
+        return send_file(
+            model_path,
+            as_attachment=True,
+            download_name=filename
+        )
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/inference', methods=['POST'])
 def inference():
     """

@@ -3,8 +3,14 @@
 AI 에이전트 실행 스크립트
 학습된 PPO 모델을 로드하여 RC Car를 0.1초 간격으로 제어
 
+QR 코드 감지 기능:
+    - 실제 하드웨어 환경(--env-type real)에서 자동 활성화
+    - QR 코드 감지 시 차량이 4초간 자동 정지
+    - QR 코드 데이터가 콘솔에 출력됨
+
 사용법:
     python run_ai_agent.py --model ppo_model.pth --port /dev/ttyACM0 --delay 0.1
+    python run_ai_agent.py --model ppo_model.pth --env-type real --episodes 5
 """
 
 import os
@@ -279,6 +285,20 @@ class AIAgentRunner:
         
         try:
             for step in range(self.max_steps):
+                # QR 코드 체크 (실제 하드웨어 환경일 때만)
+                if self.env_type == 'real' and hasattr(self.env, 'rc_car'):
+                    try:
+                        qr_detected, qr_data = self.env.rc_car.check_and_stop_on_qr()
+                        if qr_detected:
+                            if verbose:
+                                print(f"🛑 QR 코드 감지: '{qr_data}' - 4초간 정지 중...")
+                            # QR 코드로 인해 차량이 정지되었으므로 다음 스텝으로
+                            time.sleep(self.action_delay)
+                            continue
+                    except Exception as qr_error:
+                        if verbose:
+                            print(f"⚠️  QR 코드 체크 실패: {qr_error}")
+                
                 # 상태 정규화 [0, 255] -> [0, 1]
                 state_normalized = state.astype(np.float32) / 255.0
                 state_tensor = torch.FloatTensor(state_normalized).unsqueeze(0).to(self.device)

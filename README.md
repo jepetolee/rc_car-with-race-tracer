@@ -11,6 +11,7 @@
 6. [사전학습 모델과 현장 Teacher Forcing 운용](#6-사전학습-모델과-현장-teacher-forcing-운용)
 7. [서버 기반 학습 제어(REST API + client_upload.py)](#7-서버-기반-학습-제어rest-api--client_uploadpy)
 8. [문제 해결, 액션 정의, 참고 자료](#8-문제-해결-액션-정의-참고-자료)
+   - [학습된 모델로 시험 주행 (QR 코드 감지 포함)](#83-학습된-모델로-시험-주행)
 
 ---
 
@@ -267,13 +268,119 @@ python3 client_upload.py \
     --batch-size 64 \
     --learning-rate 3e-4
 
-# 모델 다운로드
+# 모델 목록 조회
+python3 client_upload.py --server http://SERVER_IP:5000 --list
+
+# 최신 모델 다운로드
 python3 client_upload.py --server http://SERVER_IP:5000 --download latest_model.pth
 ```
 - `--train`와 `--train-imitation`은 같은 동작
 - Teacher Forcing 호출 시에도 이제 `learning_rate`, `model_path` 전달 가능
 
-### 7.3 직접 REST 호출
+### 7.3 학습된 모델 다운로드
+
+학습 완료 후 서버에 저장된 모델을 다운로드하는 방법입니다.
+
+#### 방법 1: client_upload.py 사용 (추천)
+
+```bash
+# 1. 사용 가능한 모델 목록 조회
+python3 client_upload.py --server http://SERVER_IP:5000 --list
+
+# 출력 예시:
+# 📋 사용 가능한 모델 (5개):
+#    - pretrained_20251129_190816.pth (12345678 bytes, 2025-11-29T19:08:16)
+#    - imitation_rl_20251129_191640.pth (23456789 bytes, 2025-11-29T19:16:40)
+#    - a3c_model_best.pth (34567890 bytes, 2025-11-29T18:00:00)
+#    ...
+
+# 2. 최신 모델 다운로드 (가장 최근에 저장된 모델)
+python3 client_upload.py \
+    --server http://SERVER_IP:5000 \
+    --download latest_model.pth
+
+# 3. 특정 모델 다운로드 (REST API 직접 호출, 아래 참고)
+```
+
+**참고**: 학습 요청 후 응답에서 `model_path`를 확인할 수 있습니다:
+```json
+{
+    "status": "success",
+    "model_path": "trained_models/pretrained_20251129_190816.pth",
+    "epochs": 20
+}
+```
+
+#### 방법 2: REST API 직접 호출
+
+```bash
+# 모델 목록 조회
+curl http://SERVER_IP:5000/api/model/list
+
+# 최신 모델 다운로드
+curl -O http://SERVER_IP:5000/api/model/latest
+
+# 또는 파일명 지정
+curl http://SERVER_IP:5000/api/model/latest -o my_model.pth
+
+# 특정 모델 다운로드 (파일명으로)
+curl -O http://SERVER_IP:5000/api/model/download/pretrained_20251129_190816.pth
+```
+
+**응답 예시 (`/api/model/list`)**:
+```json
+{
+    "models": [
+        {
+            "filename": "pretrained_20251129_190816.pth",
+            "size": 12345678,
+            "modified": "2025-11-29T19:08:16"
+        },
+        {
+            "filename": "imitation_rl_20251129_191640.pth",
+            "size": 23456789,
+            "modified": "2025-11-29T19:16:40"
+        }
+    ]
+}
+```
+
+#### 전체 워크플로우 예시
+
+```bash
+# 1. 데이터 업로드
+python3 client_upload.py --server http://SERVER_IP:5000 --upload demos.pkl
+
+# 2. Teacher Forcing 학습 요청
+python3 client_upload.py \
+    --server http://SERVER_IP:5000 \
+    --train-supervised uploaded_data/demos.pkl \
+    --epochs 20 \
+    --batch-size 64
+
+# 응답에서 model_path 확인:
+# "model_path": "trained_models/pretrained_20251129_190816.pth"
+
+# 3. Imitation RL 학습 (Teacher Forcing 모델 사용)
+python3 client_upload.py \
+    --server http://SERVER_IP:5000 \
+    --train uploaded_data/demos.pkl \
+    --pretrain-model trained_models/pretrained_20251129_190816.pth \
+    --epochs 100
+
+# 4. 모델 목록 확인
+python3 client_upload.py --server http://SERVER_IP:5000 --list
+
+# 5. 최신 모델 다운로드
+python3 client_upload.py \
+    --server http://SERVER_IP:5000 \
+    --download latest_model.pth
+
+# 또는 특정 모델 다운로드 (curl 사용)
+curl -O http://SERVER_IP:5000/api/model/download/imitation_rl_20251129_191640.pth
+```
+
+### 7.4 직접 REST 호출
 ```bash
 # Teacher Forcing
 curl -X POST http://SERVER_IP:5000/api/train/supervised \
@@ -297,13 +404,16 @@ curl -X POST http://SERVER_IP:5000/api/train/imitation_rl \
       }'
 ```
 
-### 7.4 파라미터 참고
+### 7.5 파라미터 참고
 
-| 엔드포인트 | 필수 | 선택/기본값 |
-|------------|------|-------------|
-| `/api/train/supervised` | `file_path` | `epochs`(100), `batch_size`(64), `learning_rate`(3e-4), `model_path`(없으면 `a3c_model_best.pth` 탐색) |
-| `/api/train/imitation_rl` | `file_path` | `model_path`(기본 `a3c_model_best.pth`), `epochs`, `batch_size`, `learning_rate` |
-| `/api/upload_data` | 파일 스트림 | 자동으로 `uploaded_data/demos_*.pkl` 저장 |
+| 엔드포인트 | 메서드 | 필수 | 선택/기본값 |
+|------------|--------|------|-------------|
+| `/api/train/supervised` | POST | `file_path` | `epochs`(100), `batch_size`(64), `learning_rate`(3e-4), `model_path`(없으면 `a3c_model_best.pth` 탐색) |
+| `/api/train/imitation_rl` | POST | `file_path` | `model_path`(기본 `a3c_model_best.pth`), `epochs`, `batch_size`, `learning_rate` |
+| `/api/upload_data` | POST | 파일 스트림 | 자동으로 `uploaded_data/demos_*.pkl` 저장 |
+| `/api/model/list` | GET | 없음 | 사용 가능한 모든 모델 목록 반환 |
+| `/api/model/latest` | GET | 없음 | 가장 최근에 저장된 모델 다운로드 |
+| `/api/model/download/<filename>` | GET | `filename` | 특정 모델 파일 다운로드 (예: `pretrained_20251129_190816.pth`) |
 
 응답에는 학습된 모델 경로나 Match Rate 등이 포함되며, 실패 시 `traceback`을 함께 제공하므로 `client_upload.py`가 콘솔에 상세 오류를 출력합니다.
 
@@ -326,8 +436,97 @@ curl -X POST http://SERVER_IP:5000/api/train/imitation_rl \
 - Arduino 응답 X: 시리얼 모니터 종료, 보드 리셋, 보드레이트 9600 확인
 - 카메라 인식 X: `sudo raspi-config` > Interface Options > Camera > Enable, `vcgencmd get_camera`
 
-### 8.3 유용한 스크립트 모음
-- `run_ai_agent.py`: 학습된 모델 추론
+### 8.3 학습된 모델로 시험 주행
+
+학습이 완료된 모델을 사용하여 실제 RC Car를 제어하고 시험 주행하는 방법입니다.
+
+#### 8.3.1 기본 시험 주행
+
+```bash
+# 기본 사용법 (실제 하드웨어)
+python run_ai_agent.py \
+    --model trained_models/imitation_rl_20251129_191640.pth \
+    --env-type real \
+    --port /dev/ttyACM0 \
+    --delay 0.1 \
+    --max-steps 1000
+
+# 여러 에피소드 실행
+python run_ai_agent.py \
+    --model trained_models/imitation_rl_20251129_191640.pth \
+    --env-type real \
+    --episodes 5 \
+    --delay 0.1
+```
+
+**주요 옵션:**
+- `--model`: 학습된 모델 경로 (필수)
+- `--env-type real`: 실제 하드웨어 환경 사용
+- `--port /dev/ttyACM0`: Arduino 시리얼 포트
+- `--delay 0.1`: 액션 간 지연 시간 (초, 기본: 0.1)
+- `--max-steps 1000`: 최대 스텝 수
+- `--episodes 5`: 실행할 에피소드 수
+
+#### 8.3.2 QR 코드 감지 기능
+
+시험 주행 중 QR 코드를 감지하면 자동으로 차량이 **4초간 정지**합니다. 이 기능은 `run_ai_agent.py`에서 자동으로 활성화됩니다 (실제 하드웨어 환경일 때만).
+
+**QR 코드 감지 동작:**
+1. 매 스텝마다 카메라 이미지에서 QR 코드 검사
+2. QR 코드가 감지되고 차량이 이동 중이면 즉시 정지
+3. 4초간 정지 후 자동 제어 재개
+4. QR 코드 데이터가 로그에 출력됨
+
+**QR 코드 테스트:**
+
+```bash
+# QR 코드 감지 기능만 테스트 (하드웨어 제어 없음)
+python test_qr_detection.py
+
+# 60초 동안 테스트
+python test_qr_detection.py --duration 60
+
+# 하드웨어 제어 포함 테스트
+python test_qr_detection.py --with-hardware --duration 60
+```
+
+#### 8.3.3 서버에서 다운로드한 모델로 시험 주행
+
+```bash
+# 1. 서버에서 모델 다운로드
+python client_upload.py --server http://SERVER_IP:5000 --download latest_model.pth
+
+# 2. 다운로드한 모델로 시험 주행
+python run_ai_agent.py \
+    --model latest_model.pth \
+    --env-type real \
+    --port /dev/ttyACM0 \
+    --delay 0.1
+```
+
+#### 8.3.4 주의사항
+
+1. **안전 확인**
+   - 시험 주행 전 충분한 공간 확보
+   - 차량이 장애물에 부딪히지 않도록 주변 정리
+   - 긴급 정지를 위한 키보드 인터럽트 준비 (Ctrl+C)
+
+2. **모델 호환성**
+   - 모델이 `state_dim=784` (28×28 이미지를 784차원 벡터로)을 사용하는지 확인
+   - TRM-PPO 모델 (`use_recurrent=True`)과 일반 PPO 모델 모두 지원
+
+3. **QR 코드 감지**
+   - QR 코드가 카메라 화면 전체에서 감지됨
+   - 차량이 정지 상태일 때는 QR 코드 감지 시에도 추가 정지 없음
+   - 동일 QR 코드의 중복 감지는 방지됨
+
+4. **디버깅**
+   - `--quiet` 옵션을 제거하여 상세 로그 확인
+   - 각 스텝의 액션, 리워드, 상태 가치가 출력됨
+
+### 8.4 유용한 스크립트 모음
+- `run_ai_agent.py`: 학습된 모델 추론 및 시험 주행
+- `test_qr_detection.py`: QR 코드 감지 기능 테스트
 - `upload_patches.py`: patch 단위 업로드
 - `train_human_feedback.py`: 사람 평가 기반 학습
 - `train_with_teacher_forcing.py`: Teacher Forcing + (선택) RL
