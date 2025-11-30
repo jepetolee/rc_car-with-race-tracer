@@ -89,7 +89,7 @@ class RC_Car_Interface():
             return True, data
 
         return bool(data), data or ""
-    
+        
     def get_raw_image(self):
         """
         원본 320x320 그레이스케일 이미지를 반환합니다 (전처리 없이).
