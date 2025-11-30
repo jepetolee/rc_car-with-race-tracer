@@ -28,14 +28,14 @@ ACTION_STOP = 0       # 정지/코스팅
 ACTION_RIGHT_GAS = 1  # 우회전 + 가스
 ACTION_LEFT_GAS = 2   # 좌회전 + 가스
 ACTION_GAS = 3        # 직진 가스
-ACTION_BRAKE = 4      # 브레이크 (RC Car에서는 정지와 동일)
+ACTION_BRAKE = 4      # 브레이크 (Python에서 뒤로 가기로 변환)
 
 ACTION_NAMES = {
     0: "Stop (Coast)",
     1: "Right + Gas",
     2: "Left + Gas",
     3: "Gas (Forward)",
-    4: "Stop (Brake)"  # RC Car에서는 0과 동일하게 처리
+    4: "Brake (Backward)"  # Python에서 B 명령으로 뒤로 가기 처리
 }
 
 
@@ -103,11 +103,7 @@ class RCCarController:
                 1: Right + Gas (우회전 + 가스)
                 2: Left + Gas (좌회전 + 가스)
                 3: Gas (직진 가스)
-                4: Brake (브레이크) → 정지 (0과 동일)
-        
-        Note:
-            CarRacing에서 학습 시 action 0과 4는 다르게 취급되지만,
-            RC Car 실행 시에는 둘 다 정지로 매핑됨
+                4: Brake (브레이크) → 뒤로 가기 (Python에서 B 명령으로 변환)
         """
         action = int(action)
         if action < 0 or action > 4:
@@ -116,7 +112,12 @@ class RCCarController:
         
         action_name = ACTION_NAMES.get(action, "Unknown")
         print(f"Action {action}: {action_name}")
-        self.send_command(f"A{action}")
+        
+        # Action 4는 뒤로 가기로 처리 (B 명령 사용)
+        if action == 4:
+            self.send_command("B")
+        else:
+            self.send_command(f"A{action}")
     
     def forward(self, speed=200):
         """Move forward / Gas (speed: 0-255)"""
