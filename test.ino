@@ -8,13 +8,13 @@ AF_DCMotor motor2(2);
 String command = "";
 char commandType = 'S';  // F: Forward, B: Backward, L: Left+Gas, R: Right+Gas, S: Backward, X: Stop
 int speedValue = 0;
-const unsigned long COMMAND_DURATION_MS = 250;  // 최소 명령 지속 시간: 100ms (0.1초)
+const unsigned long COMMAND_DURATION_MS = 300;  // 최소 명령 지속 시간: 100ms (0.1초)
 bool commandActive = false;
 unsigned long commandStartTime = 0;
 
 // 기본 속도 설정
-const int DEFAULT_SPEED = 220;
-const int TURN_SPEED_HIGH = 220;
+const int DEFAULT_SPEED = 250;
+const int TURN_SPEED_HIGH = 250;
 const int TURN_SPEED_LOW = 50;
 
 void setup() {
