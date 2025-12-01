@@ -93,16 +93,20 @@ class QRCNNDetector:
         
         return img_tensor
     
-    def detect(self, img, threshold=0.5):
+    def detect(self, img, threshold=0.5, return_probs=False):
         """
         QR 코드 감지
         
         Args:
             img: 원본 이미지 (numpy array, grayscale)
             threshold: 확률 임계값 (기본: 0.5)
+            return_probs: True면 확률 분포도 반환 (기본: False)
         
         Returns:
-            (has_qr: bool, confidence: float): QR 코드가 있는지 여부와 신뢰도
+            (has_qr: bool, confidence: float) 또는 (has_qr: bool, confidence: float, probs: tuple)
+            - has_qr: QR 코드가 있는지 여부
+            - confidence: 가장 높은 확률 (신뢰도)
+            - probs: (qr_absent_prob, qr_present_prob) - return_probs=True일 때만
         """
         # 전처리
         img_tensor = self.preprocess_image(img)
@@ -113,9 +117,16 @@ class QRCNNDetector:
             probabilities = F.softmax(outputs, dim=1)
             confidence, predicted = torch.max(probabilities, 1)
             
+            # 확률 분포 추출
+            probs = probabilities[0].cpu().numpy()
+            qr_absent_prob = probs[0]  # QR 없음 확률
+            qr_present_prob = probs[1]  # QR 있음 확률
+            
             has_qr = (predicted.item() == 1) and (confidence.item() >= threshold)
             conf = confidence.item()
         
+        if return_probs:
+            return has_qr, conf, (qr_absent_prob, qr_present_prob)
         return has_qr, conf
     
     def get_stats(self):
