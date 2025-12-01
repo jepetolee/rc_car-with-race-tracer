@@ -291,6 +291,18 @@ class AIAgentRunner:
                 print(f"   시도한 경로들:")
                 for p in possible_paths:
                     print(f"     - {p} ({'존재' if os.path.exists(p) else '없음'})")
+                
+                # 사용 가능한 모델 목록 표시
+                trained_models_dir = 'trained_models'
+                if os.path.exists(trained_models_dir):
+                    available_models = [f for f in os.listdir(trained_models_dir) if f.endswith('.pth')]
+                    if available_models:
+                        print(f"\n   사용 가능한 모델 목록:")
+                        for model in available_models:
+                            model_path = os.path.join(trained_models_dir, model)
+                            size_mb = os.path.getsize(model_path) / (1024 * 1024)
+                            print(f"     - {model} ({size_mb:.1f} MB)")
+                
                 print("랜덤 정책으로 실행합니다.")
                 self.env.reset()
                 return agent
