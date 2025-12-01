@@ -361,7 +361,7 @@ class AIAgentRunner:
                         # CNN 모델 사용
                         img = self.env.rc_car.get_raw_image()
                         has_qr, confidence, (qr_absent_prob, qr_present_prob) = self.qr_cnn_detector.detect(
-                            img, threshold=0.5, return_probs=True
+                            img, threshold=0.7, return_probs=True
                         )
                         
                         # QR 감지 상태 출력 (매 스텝마다)
