@@ -146,19 +146,57 @@ class AIAgentRunner:
         # QR CNN 모델 로드 (옵션)
         print("\n[초기화 단계 4/5] QR CNN 모델 로드 중...")
         self.qr_cnn_detector = None
-        if qr_cnn_model_path and os.path.exists(qr_cnn_model_path):
-            try:
-                from detect_qr_with_cnn import QRCNNDetector
-                # device를 torch.device 객체로 변환
-                qr_device = torch.device(self.device) if isinstance(self.device, str) else self.device
-                self.qr_cnn_detector = QRCNNDetector(qr_cnn_model_path, device=qr_device)
-                print(f"✅ QR CNN 모델 로드 완료: {qr_cnn_model_path}")
-            except Exception as e:
-                print(f"⚠️  QR CNN 모델 로드 실패: {e}")
-                print("   OpenCV 기본 QR 감지기를 사용합니다.")
-        elif qr_cnn_model_path:
-            print(f"⚠️  QR CNN 모델 파일을 찾을 수 없습니다: {qr_cnn_model_path}")
-            print("   OpenCV 기본 QR 감지기를 사용합니다.")
+        if qr_cnn_model_path:
+            # 파일 경로 확인 (상대 경로, 절대 경로 모두 확인)
+            qr_model_file = qr_cnn_model_path
+            if not os.path.isabs(qr_model_file):
+                # 상대 경로인 경우 여러 가능한 경로 확인
+                possible_paths = [
+                    qr_model_file,  # 현재 디렉토리 기준
+                    os.path.join('.', qr_model_file),  # 현재 디렉토리 명시
+                    os.path.join('trained_models', qr_model_file),  # trained_models 폴더
+                    os.path.join('trained_models', os.path.basename(qr_model_file)),  # 파일명만 사용
+                ]
+                
+                found = False
+                for candidate in possible_paths:
+                    if os.path.exists(candidate):
+                        qr_model_file = candidate
+                        found = True
+                        break
+                
+                if not found:
+                    print(f"⚠️  QR CNN 모델 파일을 찾을 수 없습니다: {qr_cnn_model_path}")
+                    print(f"   시도한 경로들:")
+                    for p in possible_paths:
+                        print(f"     - {p} ({'존재' if os.path.exists(p) else '없음'})")
+                    print("   OpenCV 기본 QR 감지기를 사용합니다.")
+                else:
+                    # 파일이 존재하면 로드 시도
+                    try:
+                        from detect_qr_with_cnn import QRCNNDetector
+                        # device를 torch.device 객체로 변환
+                        qr_device = torch.device(self.device) if isinstance(self.device, str) else self.device
+                        self.qr_cnn_detector = QRCNNDetector(qr_model_file, device=qr_device)
+                        print(f"✅ QR CNN 모델 로드 완료: {qr_model_file}")
+                    except Exception as e:
+                        print(f"⚠️  QR CNN 모델 로드 실패: {e}")
+                        print(f"   파일은 존재하지만 QR CNN 모델 형식이 아닐 수 있습니다.")
+                        print("   OpenCV 기본 QR 감지기를 사용합니다.")
+            else:
+                # 절대 경로인 경우
+                if os.path.exists(qr_model_file):
+                    try:
+                        from detect_qr_with_cnn import QRCNNDetector
+                        qr_device = torch.device(self.device) if isinstance(self.device, str) else self.device
+                        self.qr_cnn_detector = QRCNNDetector(qr_model_file, device=qr_device)
+                        print(f"✅ QR CNN 모델 로드 완료: {qr_model_file}")
+                    except Exception as e:
+                        print(f"⚠️  QR CNN 모델 로드 실패: {e}")
+                        print("   OpenCV 기본 QR 감지기를 사용합니다.")
+                else:
+                    print(f"⚠️  QR CNN 모델 파일을 찾을 수 없습니다: {qr_model_file}")
+                    print("   OpenCV 기본 QR 감지기를 사용합니다.")
         else:
             print("ℹ️  QR CNN 모델 미지정 - OpenCV 기본 QR 감지기 사용")
         
@@ -230,16 +268,43 @@ class AIAgentRunner:
             device=self.device,
         )
 
-        if os.path.exists(self.model_path):
+        # 파일 경로 확인 (상대 경로, 절대 경로 모두 확인)
+        model_file = self.model_path
+        if not os.path.isabs(model_file):
+            # 상대 경로인 경우 여러 가능한 경로 확인
+            possible_paths = [
+                model_file,  # 현재 디렉토리 기준
+                os.path.join('.', model_file),  # 현재 디렉토리 명시
+                os.path.join('trained_models', model_file),  # trained_models 폴더
+                os.path.join('trained_models', os.path.basename(model_file)),  # 파일명만 사용
+            ]
+            
+            found = False
+            for candidate in possible_paths:
+                if os.path.exists(candidate):
+                    model_file = candidate
+                    found = True
+                    break
+            
+            if not found:
+                print(f"⚠️  모델 파일을 찾을 수 없습니다: {self.model_path}")
+                print(f"   시도한 경로들:")
+                for p in possible_paths:
+                    print(f"     - {p} ({'존재' if os.path.exists(p) else '없음'})")
+                print("랜덤 정책으로 실행합니다.")
+                self.env.reset()
+                return agent
+        
+        if os.path.exists(model_file):
             try:
-                print(f"📥 모델 가중치 로드 중: {self.model_path}")
-                agent.load(self.model_path, strict=False)
-                print(f"✅ 모델 로드 완료: {self.model_path}")
+                print(f"📥 모델 가중치 로드 중: {model_file}")
+                agent.load(model_file, strict=False)
+                print(f"✅ 모델 로드 완료: {model_file}")
             except Exception as e:
                 print(f"⚠️  모델 로드 실패: {e}")
                 print("랜덤 정책으로 실행합니다.")
         else:
-            print(f"⚠️  모델 파일을 찾을 수 없습니다: {self.model_path}")
+            print(f"⚠️  모델 파일을 찾을 수 없습니다: {model_file}")
             print("랜덤 정책으로 실행합니다.")
 
         self.env.reset()

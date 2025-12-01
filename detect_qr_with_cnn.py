@@ -51,9 +51,21 @@ class QRCNNDetector:
         print(f"모델 로드 중: {model_path}")
         checkpoint = torch.load(model_path, map_location=self.device)
         
+        # QR CNN 모델 체크포인트 형식 확인
+        if 'model_state_dict' not in checkpoint:
+            raise ValueError(
+                f"이 파일은 QR CNN 모델이 아닙니다. "
+                f"체크포인트에 'model_state_dict' 키가 없습니다. "
+                f"사용 가능한 키: {list(checkpoint.keys())}"
+            )
+        
         # 모델 타입 확인
         if 'model_type' in checkpoint:
             model_type = checkpoint['model_type']
+        else:
+            # model_type이 없으면 기본값 사용
+            model_type = 'standard'
+            print(f"⚠️  체크포인트에 model_type이 없어 기본값 'standard' 사용")
         
         # 모델 생성 및 로드
         self.model = create_model(model_type=model_type, input_size=320, num_classes=2)
