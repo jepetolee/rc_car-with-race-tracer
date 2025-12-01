@@ -355,55 +355,37 @@ class AIAgentRunner:
         
         try:
             for step in range(self.max_steps):
-                # QR 코드 체크 (실제 하드웨어 환경일 때만)
-                if self.env_type == 'real' and hasattr(self.env, 'rc_car'):
+                # QR 코드 체크 (실제 하드웨어 환경일 때만, CNN 모델 사용)
+                if self.env_type == 'real' and hasattr(self.env, 'rc_car') and self.qr_cnn_detector:
                     try:
-                        # CNN 모델이 있으면 CNN 사용, 없으면 OpenCV 사용
-                        if self.qr_cnn_detector:
-                            # CNN 모델 사용
-                            img = self.env.rc_car.get_raw_image()
-                            has_qr, confidence, (qr_absent_prob, qr_present_prob) = self.qr_cnn_detector.detect(
-                                img, threshold=0.5, return_probs=True
-                            )
-                            
-                            # QR 감지 상태 출력 (매 스텝마다)
+                        # CNN 모델 사용
+                        img = self.env.rc_car.get_raw_image()
+                        has_qr, confidence, (qr_absent_prob, qr_present_prob) = self.qr_cnn_detector.detect(
+                            img, threshold=0.5, return_probs=True
+                        )
+                        
+                        # QR 감지 상태 출력 (매 스텝마다)
+                        if verbose:
+                            status = "✅ QR 있음" if has_qr else "❌ QR 없음"
+                            print(f"[QR 체크] {status} | 없음: {qr_absent_prob:.2%} | 있음: {qr_present_prob:.2%} | 신뢰도: {confidence:.2f}")
+                        
+                        if has_qr:
                             if verbose:
-                                status = "✅ QR 있음" if has_qr else "❌ QR 없음"
-                                print(f"[QR 체크] {status} | 없음: {qr_absent_prob:.2%} | 있음: {qr_present_prob:.2%} | 신뢰도: {confidence:.2f}")
+                                print(f"🛑 QR 코드 감지 (CNN, 신뢰도: {confidence:.2f}) - 4초간 정지 중...")
                             
-                            if has_qr:
-                                if verbose:
-                                    print(f"🛑 QR 코드 감지 (CNN, 신뢰도: {confidence:.2f}) - 4초간 정지 중...")
-                                
-                                # 차량 정지
-                                if self.controller:
-                                    self.controller.execute_discrete_action(0)  # Stop
-                                
-                                # 4초 대기
-                                time.sleep(4.0)
-                                
-                                if verbose:
-                                    print("🔄 정지 해제 - 주행 재개")
-                                
-                                # 다음 스텝으로
-                                time.sleep(self.action_delay)
-                                continue
-                        else:
-                            # OpenCV 기본 감지기 사용
-                            qr_detected, qr_data = self.env.rc_car.check_and_stop_on_qr()
+                            # 차량 정지
+                            if self.controller:
+                                self.controller.execute_discrete_action(0)  # Stop
                             
-                            # QR 감지 상태 출력 (매 스텝마다)
+                            # 4초 대기
+                            time.sleep(4.0)
+                            
                             if verbose:
-                                status = "✅ QR 있음" if qr_detected else "❌ QR 없음"
-                                qr_info = f" (데이터: '{qr_data}')" if qr_data else ""
-                                print(f"[QR 체크] {status}{qr_info}")
+                                print("🔄 정지 해제 - 주행 재개")
                             
-                            if qr_detected:
-                                if verbose:
-                                    print(f"🛑 QR 코드 감지 (OpenCV): '{qr_data}' - 4초간 정지 중...")
-                                # QR 코드로 인해 차량이 정지되었으므로 다음 스텝으로
-                                time.sleep(self.action_delay)
-                                continue
+                            # 다음 스텝으로
+                            time.sleep(self.action_delay)
+                            continue
                     except Exception as qr_error:
                         if verbose:
                             print(f"⚠️  QR 코드 체크 실패: {qr_error}")
@@ -598,7 +580,7 @@ def main():
             use_discrete_actions=args.use_discrete_actions,
             use_extended_actions=args.use_extended_actions,
             device=args.device,
-            qr_cnn_model_path=None if args.no_qr_cnn else getattr(args, 'qr_cnn_model', 'trained_models/qr_cnn_standard_best.pth')
+            qr_cnn_model_path=None if args.no_qr_cnn else args.qr_cnn_model
         )
         print("✅ AIAgentRunner 생성 완료")
     except Exception as e:
