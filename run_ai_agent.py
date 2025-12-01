@@ -540,8 +540,8 @@ def main():
     )
     
     # 모델 경로
-    parser.add_argument('--model', type=str, required=True,
-                        help='학습된 모델 경로 (예: ppo_model.pth)')
+    parser.add_argument('--model', type=str, default='trained_models/pretrained_teacher_forcing.pth',
+                        help='학습된 모델 경로 (기본: trained_models/pretrained_teacher_forcing.pth, 없으면 랜덤 정책)')
     
     # 환경 설정
     parser.add_argument('--env-type', choices=['carracing', 'sim', 'real'],
@@ -575,8 +575,10 @@ def main():
                         help='디바이스 (cuda/cpu, 기본: 자동 선택)')
     
     # QR CNN 모델
-    parser.add_argument('--qr-cnn-model', type=str, default=None,
-                        help='QR CNN 모델 경로 (지정 시 CNN 사용, 미지정 시 OpenCV 사용)')
+    parser.add_argument('--qr-cnn-model', type=str, default='trained_models/qr_cnn_standard_best.pth',
+                        help='QR CNN 모델 경로 (기본: trained_models/qr_cnn_standard_best.pth)')
+    parser.add_argument('--no-qr-cnn', action='store_true',
+                        help='QR CNN 모델 사용 안 함 (OpenCV 기본 감지기 사용)')
     
     args = parser.parse_args()
     
@@ -596,7 +598,7 @@ def main():
             use_discrete_actions=args.use_discrete_actions,
             use_extended_actions=args.use_extended_actions,
             device=args.device,
-            qr_cnn_model_path=getattr(args, 'qr_cnn_model', None)
+            qr_cnn_model_path=None if args.no_qr_cnn else getattr(args, 'qr_cnn_model', 'trained_models/qr_cnn_standard_best.pth')
         )
         print("✅ AIAgentRunner 생성 완료")
     except Exception as e:
