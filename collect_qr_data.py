@@ -143,22 +143,21 @@ class QRDataCollector:
             rc_car = RC_Car_Interface()
             print("✅ 카메라 초기화 완료\n")
             
-            # 디스플레이 사용 가능 여부 확인
+            # 디스플레이 사용 가능 여부 확인 (환경 변수로 먼저 확인)
             headless = False
             termios_settings = None
-            try:
-                # 테스트 이미지로 디스플레이 확인
-                test_img = np.zeros((100, 100, 3), dtype=np.uint8)
-                cv2.imshow('test', test_img)
-                cv2.waitKey(1)
-                cv2.destroyAllWindows()
+            
+            # DISPLAY 환경 변수 확인
+            if not os.environ.get('DISPLAY'):
+                headless = True
+                print("⚠️  DISPLAY 환경 변수가 설정되지 않았습니다. 헤드리스 모드로 실행합니다.")
+                print("   키보드 입력으로만 제어할 수 있습니다.\n")
+            else:
                 print("이미지 캡처 대기 중...")
                 print("(첫 이미지가 표시되면 키를 입력하세요)\n")
-            except (cv2.error, Exception) as e:
-                headless = True
-                print("⚠️  디스플레이를 사용할 수 없습니다. 헤드리스 모드로 실행합니다.")
-                print("   키보드 입력으로만 제어할 수 있습니다.\n")
-                # 헤드리스 모드에서 키보드 입력을 위해 termios 설정
+            
+            # 헤드리스 모드에서 키보드 입력을 위해 termios 설정
+            if headless:
                 try:
                     import termios
                     import tty
@@ -187,11 +186,26 @@ class QRDataCollector:
                         
                         cv2.imshow('QR Data Collection', display_img)
                         key = cv2.waitKey(100) & 0xFF
-                    except (cv2.error, Exception):
+                    except (cv2.error, Exception) as e:
                         # 디스플레이 오류 발생 시 헤드리스 모드로 전환
-                        headless = True
-                        print("\n⚠️  디스플레이 오류: 헤드리스 모드로 전환합니다...")
-                        cv2.destroyAllWindows()
+                        if not headless:
+                            headless = True
+                            print(f"\n⚠️  디스플레이 오류: {str(e)[:100]}")
+                            print("⚠️  헤드리스 모드로 전환합니다...")
+                            try:
+                                cv2.destroyAllWindows()
+                            except:
+                                pass
+                            # 헤드리스 모드에서 키보드 입력을 위해 termios 설정
+                            if termios_settings is None:
+                                try:
+                                    import termios
+                                    import tty
+                                    termios_settings = termios.tcgetattr(sys.stdin)
+                                    tty.setraw(sys.stdin.fileno())
+                                except Exception:
+                                    pass
+                        key = None
                 
                 if headless:
                     # 헤드리스 모드: 키보드 입력 확인 (논블로킹)
