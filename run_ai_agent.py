@@ -314,6 +314,13 @@ class AIAgentRunner:
                         else:
                             # OpenCV 기본 감지기 사용
                             qr_detected, qr_data = self.env.rc_car.check_and_stop_on_qr()
+                            
+                            # QR 감지 상태 출력 (매 스텝마다)
+                            if verbose:
+                                status = "✅ QR 있음" if qr_detected else "❌ QR 없음"
+                                qr_info = f" (데이터: '{qr_data}')" if qr_data else ""
+                                print(f"[QR 체크] {status}{qr_info}")
+                            
                             if qr_detected:
                                 if verbose:
                                     print(f"🛑 QR 코드 감지 (OpenCV): '{qr_data}' - 4초간 정지 중...")
