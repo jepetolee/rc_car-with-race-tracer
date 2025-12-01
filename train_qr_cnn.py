@@ -201,18 +201,68 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"사용 디바이스: {device}")
     
+    # Augmentation 설정
+    print("\nAugmentation 설정 중...")
+    train_transform = transforms.Compose([
+        transforms.RandomRotation(degrees=15),  # ±15도 회전
+        transforms.RandomAffine(degrees=0, translate=(0.1, 0.1)),  # 10% 이동
+        transforms.RandomHorizontalFlip(p=0.5),  # 좌우 반전
+        transforms.RandomVerticalFlip(p=0.5),  # 상하 반전
+        transforms.ColorJitter(brightness=0.2, contrast=0.2),  # 밝기/대비 조정
+        transforms.RandomApply([
+            transforms.Lambda(lambda x: torch.clamp(x + torch.randn_like(x) * 0.1, 0, 1))  # 노이즈 추가 (0-1 범위 유지)
+        ], p=0.3),
+    ])
+    
+    # 검증용 transform (augmentation 없음)
+    val_transform = None
+    
+    print("✅ Augmentation 적용:")
+    print("  - 회전: ±15도")
+    print("  - 이동: 10%")
+    print("  - 좌우 반전: 50% 확률")
+    print("  - 상하 반전: 50% 확률")
+    print("  - 밝기/대비 조정: ±20%")
+    print("  - 노이즈 추가: 30% 확률")
+    
     # 데이터셋 로드
     print("\n데이터셋 로드 중...")
-    dataset = QRDataset(args.data_dir)
+    full_dataset = QRDataset(args.data_dir, transform=None)  # 전체 데이터셋은 transform 없이
     
-    if len(dataset) == 0:
+    if len(full_dataset) == 0:
         print("❌ 데이터가 없습니다. 먼저 collect_qr_data.py로 데이터를 수집하세요.")
         sys.exit(1)
     
     # Train/Val 분할
-    val_size = int(len(dataset) * args.val_split)
-    train_size = len(dataset) - val_size
-    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+    val_size = int(len(full_dataset) * args.val_split)
+    train_size = len(full_dataset) - val_size
+    
+    # 인덱스로 분할
+    indices = list(range(len(full_dataset)))
+    np.random.seed(42)  # 재현성을 위한 시드
+    np.random.shuffle(indices)
+    train_indices = indices[:train_size]
+    val_indices = indices[train_size:]
+    
+    # 커스텀 Subset 클래스 (transform을 적용할 수 있도록)
+    class TransformSubset(torch.utils.data.Dataset):
+        def __init__(self, dataset, indices, transform=None):
+            self.dataset = dataset
+            self.indices = indices
+            self.transform = transform
+        
+        def __getitem__(self, idx):
+            img, label = self.dataset[self.indices[idx]]
+            if self.transform:
+                img = self.transform(img)
+            return img, label
+        
+        def __len__(self):
+            return len(self.indices)
+    
+    # 분할된 데이터셋 생성 (train에는 augmentation 적용)
+    train_dataset = TransformSubset(full_dataset, train_indices, transform=train_transform)
+    val_dataset = TransformSubset(full_dataset, val_indices, transform=val_transform)
     
     print(f"\n데이터 분할:")
     print(f"  훈련: {train_size}장")

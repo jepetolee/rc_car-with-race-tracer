@@ -171,6 +171,17 @@ python train_qr_cnn.py --data-dir qr_dataset --lr 0.001 --epochs 50
 - `--lr`: 학습률 (기본: 0.001)
 - `--val-split`: 검증 데이터 비율 (기본: 0.2)
 
+**Augmentation (자동 적용):**
+데이터가 부족한 경우를 대비해 자동으로 augmentation이 적용됩니다:
+- 회전: ±15도
+- 이동: 10%
+- 좌우 반전: 50% 확률
+- 상하 반전: 50% 확률
+- 밝기/대비 조정: ±20%
+- 노이즈 추가: 30% 확률
+
+> **참고:** 128장 정도의 작은 데이터셋에서도 augmentation 덕분에 효과적인 학습이 가능합니다.
+
 **출력:**
 - 최고 모델: `trained_models/qr_cnn_{model_type}_best.pth`
 - 최종 모델: `trained_models/qr_cnn_{model_type}_{timestamp}.pth`
@@ -599,34 +610,55 @@ python run_ai_agent.py \
 - `--delay 0.1`: 액션 간 지연 시간 (초, 기본: 0.1)
 - `--max-steps 1000`: 최대 스텝 수
 - `--episodes 5`: 실행할 에피소드 수
+- `--qr-cnn-model`: QR CNN 모델 경로 (지정 시 CNN 사용, 미지정 시 OpenCV 사용)
 
 #### 8.3.2 QR 코드 감지 기능
 
 시험 주행 중 QR 코드를 감지하면 자동으로 차량이 **4초간 정지**합니다. 이 기능은 `run_ai_agent.py`에서 자동으로 활성화됩니다 (실제 하드웨어 환경일 때만).
 
+**QR 코드 감지 방식:**
+- **CNN 모델 사용 (권장)**: 훈련된 CNN 모델로 더 정확한 QR 코드 감지
+- **OpenCV 기본 감지기**: CNN 모델 미지정 시 자동으로 사용
+
 **QR 코드 감지 동작:**
 1. 매 스텝마다 카메라 이미지에서 QR 코드 검사
 2. QR 코드가 감지되고 차량이 이동 중이면 즉시 정지
 3. 4초간 정지 후 자동 제어 재개
-4. QR 코드 데이터가 로그에 출력됨
+4. QR 코드 감지 정보가 로그에 출력됨 (CNN 사용 시 신뢰도 포함)
 
-**QR 코드 테스트 (CNN 기반):**
+**CNN 모델을 사용한 시험 주행:**
+
+```bash
+# CNN 모델을 사용한 QR 코드 감지 포함 시험 주행
+python run_ai_agent.py \
+    --model trained_models/imitation_rl_20251129_191640.pth \
+    --env-type real \
+    --qr-cnn-model trained_models/qr_cnn_best.pth \
+    --port /dev/ttyACM0 \
+    --delay 0.1 \
+    --episodes 5
+```
+
+**QR 코드 테스트 (독립 실행):**
 
 ```bash
 # CNN 모델을 사용한 QR 코드 감지 테스트 (하드웨어 제어 없음)
-python test_qr_detection.py --model trained_models/qr_cnn_best.pth
+python detect_qr_with_cnn.py --model trained_models/qr_cnn_best.pth --no-hardware
 
 # 60초 동안 테스트
-python test_qr_detection.py --model trained_models/qr_cnn_best.pth --duration 60
+python detect_qr_with_cnn.py --model trained_models/qr_cnn_best.pth --no-hardware --duration 60
 
 # 하드웨어 제어 포함 테스트 (QR 감지 시 차량 정지)
-python test_qr_detection.py --model trained_models/qr_cnn_best.pth --with-hardware --duration 60
+python detect_qr_with_cnn.py --model trained_models/qr_cnn_best.pth --with-hardware --duration 60
 
 # 작은 모델 사용 및 임계값 조정
-python test_qr_detection.py --model trained_models/qr_cnn_small_best.pth --model-type small --threshold 0.7
+python detect_qr_with_cnn.py --model trained_models/qr_cnn_small_best.pth --model-type small --threshold 0.7
 ```
 
-> **참고:** `test_qr_detection.py`는 훈련된 CNN 모델을 사용하여 QR 코드를 감지합니다. OpenCV의 기본 QR 감지기가 아닌 CNN 분류 모델을 사용하므로 더 정확한 감지가 가능합니다.
+> **참고:** 
+> - `--qr-cnn-model` 옵션을 지정하면 훈련된 CNN 모델을 사용하여 더 정확한 QR 코드 감지가 가능합니다.
+> - CNN 모델 미지정 시 OpenCV의 기본 QR 감지기를 사용합니다.
+> - CNN 모델은 `train_qr_cnn.py`로 훈련할 수 있으며, augmentation이 적용되어 128장의 데이터로도 효과적인 학습이 가능합니다.
 
 #### 8.3.3 서버에서 다운로드한 모델로 시험 주행
 
@@ -657,6 +689,8 @@ python run_ai_agent.py \
    - QR 코드가 카메라 화면 전체에서 감지됨
    - 차량이 정지 상태일 때는 QR 코드 감지 시에도 추가 정지 없음
    - 동일 QR 코드의 중복 감지는 방지됨
+   - CNN 모델 사용 시 신뢰도 정보가 함께 출력됨
+   - `--qr-cnn-model` 옵션으로 CNN 모델 지정 가능
 
 4. **디버깅**
    - `--quiet` 옵션을 제거하여 상세 로그 확인

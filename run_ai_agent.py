@@ -6,11 +6,13 @@ AI 에이전트 실행 스크립트
 QR 코드 감지 기능:
     - 실제 하드웨어 환경(--env-type real)에서 자동 활성화
     - QR 코드 감지 시 차량이 4초간 자동 정지
-    - QR 코드 데이터가 콘솔에 출력됨
+    - CNN 모델 사용 시 더 정확한 감지 (--qr-cnn-model 옵션)
+    - CNN 모델 미지정 시 OpenCV 기본 감지기 사용
 
 사용법:
     python run_ai_agent.py --model ppo_model.pth --port /dev/ttyACM0 --delay 0.1
     python run_ai_agent.py --model ppo_model.pth --env-type real --episodes 5
+    python run_ai_agent.py --model ppo_model.pth --env-type real --qr-cnn-model trained_models/qr_cnn_best.pth
 """
 
 import os
@@ -72,7 +74,8 @@ class AIAgentRunner:
         max_steps: int = 1000,
         use_discrete_actions: bool = True,  # 이산 액션만 사용
         use_extended_actions: bool = True,
-        device: str = None
+        device: str = None,
+        qr_cnn_model_path: str = None
     ):
         """
         Args:
@@ -84,6 +87,7 @@ class AIAgentRunner:
             use_discrete_actions: 이산 액션 사용 여부
             use_extended_actions: 확장된 액션 공간 사용 여부
             device: 디바이스 (cuda/cpu)
+            qr_cnn_model_path: QR CNN 모델 경로 (None이면 OpenCV 사용)
         """
         self.model_path = model_path
         self.env_type = env_type
@@ -139,7 +143,26 @@ class AIAgentRunner:
             traceback.print_exc()
             raise
         
-        print("\n[초기화 단계 4/4] 초기화 완료!")
+        # QR CNN 모델 로드 (옵션)
+        print("\n[초기화 단계 4/5] QR CNN 모델 로드 중...")
+        self.qr_cnn_detector = None
+        if qr_cnn_model_path and os.path.exists(qr_cnn_model_path):
+            try:
+                from detect_qr_with_cnn import QRCNNDetector
+                # device를 torch.device 객체로 변환
+                qr_device = torch.device(self.device) if isinstance(self.device, str) else self.device
+                self.qr_cnn_detector = QRCNNDetector(qr_cnn_model_path, device=qr_device)
+                print(f"✅ QR CNN 모델 로드 완료: {qr_cnn_model_path}")
+            except Exception as e:
+                print(f"⚠️  QR CNN 모델 로드 실패: {e}")
+                print("   OpenCV 기본 QR 감지기를 사용합니다.")
+        elif qr_cnn_model_path:
+            print(f"⚠️  QR CNN 모델 파일을 찾을 수 없습니다: {qr_cnn_model_path}")
+            print("   OpenCV 기본 QR 감지기를 사용합니다.")
+        else:
+            print("ℹ️  QR CNN 모델 미지정 - OpenCV 기본 QR 감지기 사용")
+        
+        print("\n[초기화 단계 5/5] 초기화 완료!")
         print("=" * 60)
     
     def _create_env(self):
@@ -258,13 +281,38 @@ class AIAgentRunner:
                 # QR 코드 체크 (실제 하드웨어 환경일 때만)
                 if self.env_type == 'real' and hasattr(self.env, 'rc_car'):
                     try:
-                        qr_detected, qr_data = self.env.rc_car.check_and_stop_on_qr()
-                        if qr_detected:
-                            if verbose:
-                                print(f"🛑 QR 코드 감지: '{qr_data}' - 4초간 정지 중...")
-                            # QR 코드로 인해 차량이 정지되었으므로 다음 스텝으로
-                            time.sleep(self.action_delay)
-                            continue
+                        # CNN 모델이 있으면 CNN 사용, 없으면 OpenCV 사용
+                        if self.qr_cnn_detector:
+                            # CNN 모델 사용
+                            img = self.env.rc_car.get_raw_image()
+                            has_qr, confidence = self.qr_cnn_detector.detect(img, threshold=0.5)
+                            
+                            if has_qr:
+                                if verbose:
+                                    print(f"🛑 QR 코드 감지 (CNN, 신뢰도: {confidence:.2f}) - 4초간 정지 중...")
+                                
+                                # 차량 정지
+                                if self.controller:
+                                    self.controller.execute_discrete_action(0)  # Stop
+                                
+                                # 4초 대기
+                                time.sleep(4.0)
+                                
+                                if verbose:
+                                    print("🔄 정지 해제 - 주행 재개")
+                                
+                                # 다음 스텝으로
+                                time.sleep(self.action_delay)
+                                continue
+                        else:
+                            # OpenCV 기본 감지기 사용
+                            qr_detected, qr_data = self.env.rc_car.check_and_stop_on_qr()
+                            if qr_detected:
+                                if verbose:
+                                    print(f"🛑 QR 코드 감지 (OpenCV): '{qr_data}' - 4초간 정지 중...")
+                                # QR 코드로 인해 차량이 정지되었으므로 다음 스텝으로
+                                time.sleep(self.action_delay)
+                                continue
                     except Exception as qr_error:
                         if verbose:
                             print(f"⚠️  QR 코드 체크 실패: {qr_error}")
@@ -392,6 +440,9 @@ def main():
   # 실제 하드웨어에서 실행 (0.1초 간격)
   python run_ai_agent.py --model ppo_model.pth --env-type real --port /dev/ttyACM0 --delay 0.1
   
+  # CNN 모델을 사용한 QR 코드 감지
+  python run_ai_agent.py --model ppo_model.pth --env-type real --qr-cnn-model trained_models/qr_cnn_best.pth
+  
   # 여러 에피소드 실행
   python run_ai_agent.py --model ppo_model.pth --episodes 5 --delay 0.1
         """
@@ -432,6 +483,10 @@ def main():
     parser.add_argument('--device', type=str, default=None,
                         help='디바이스 (cuda/cpu, 기본: 자동 선택)')
     
+    # QR CNN 모델
+    parser.add_argument('--qr-cnn-model', type=str, default=None,
+                        help='QR CNN 모델 경로 (지정 시 CNN 사용, 미지정 시 OpenCV 사용)')
+    
     args = parser.parse_args()
     
     print("\n" + "=" * 60)
@@ -449,7 +504,8 @@ def main():
             max_steps=args.max_steps,
             use_discrete_actions=args.use_discrete_actions,
             use_extended_actions=args.use_extended_actions,
-            device=args.device
+            device=args.device,
+            qr_cnn_model_path=getattr(args, 'qr_cnn_model', None)
         )
         print("✅ AIAgentRunner 생성 완료")
     except Exception as e:
