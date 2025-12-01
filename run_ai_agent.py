@@ -287,6 +287,11 @@ class AIAgentRunner:
                             img = self.env.rc_car.get_raw_image()
                             has_qr, confidence = self.qr_cnn_detector.detect(img, threshold=0.5)
                             
+                            # QR 감지 상태 출력 (매 스텝마다)
+                            if verbose and step % 10 == 0:  # 10스텝마다 출력 (너무 많이 출력되지 않도록)
+                                status = "✅ QR 있음" if has_qr else "❌ QR 없음"
+                                print(f"[QR 체크] {status} (신뢰도: {confidence:.2f})")
+                            
                             if has_qr:
                                 if verbose:
                                     print(f"🛑 QR 코드 감지 (CNN, 신뢰도: {confidence:.2f}) - 4초간 정지 중...")
