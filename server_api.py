@@ -508,12 +508,28 @@ def train_supervised():
         first_episode = demonstrations[0]
         actions = first_episode.get('actions', [])
         if len(actions) > 0:
-            action_dim = int(np.max(actions)) + 1
+            data_action_dim = int(np.max(actions)) + 1
         else:
             return jsonify({'error': 'Could not determine action_dim from demonstrations'}), 400
-        print(f"📐 액션 차원: {action_dim}")
+        print(f"📐 데이터 액션 차원: {data_action_dim}")
         
+        # 베이스 모델이 있으면 그 모델의 액션 차원을 사용
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        action_dim = data_action_dim
+        if model_path and os.path.exists(model_path):
+            try:
+                # 베이스 모델의 액션 차원 확인
+                checkpoint = torch.load(model_path, map_location=device)
+                if "q_network" in checkpoint:
+                    saved_state_dict = checkpoint["q_network"]
+                    if "q_head.weight" in saved_state_dict:
+                        base_action_dim = saved_state_dict["q_head.weight"].shape[0]
+                        action_dim = base_action_dim
+                        print(f"📐 베이스 모델 액션 차원: {base_action_dim} (데이터: {data_action_dim})")
+                        print(f"📐 모델 구조를 베이스 모델에 맞춤: {action_dim}")
+            except Exception as e:
+                print(f"⚠️  베이스 모델 액션 차원 확인 실패: {e}. 데이터 액션 차원 사용: {action_dim}")
+        
         agent = DQNAgent(
             state_dim=state_dim,
             action_dim=action_dim,
@@ -524,7 +540,7 @@ def train_supervised():
         loaded_model_path = None
         if model_path and os.path.exists(model_path):
             try:
-                agent.load(model_path, strict=False)
+                agent.load(model_path, strict=True)
                 loaded_model_path = model_path
                 print(f"✅ 기존 모델 로드 완료: {model_path}")
             except Exception as e:

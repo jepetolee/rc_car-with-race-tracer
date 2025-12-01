@@ -422,7 +422,9 @@ def main():
     parser.add_argument('--train-imitation', type=str,
                         help='Imitation RL 학습할 데이터 파일 경로 (--train과 동일)')
     parser.add_argument('--pretrain-model', type=str,
-                        help='사전 학습된 모델 경로 (Imitation RL용)')
+                        help='사전 학습된 모델 경로 (Imitation RL 및 Supervised Learning용)')
+    parser.add_argument('--base-model', type=str,
+                        help='베이스 모델 경로 (Supervised Learning용, --pretrain-model과 동일)')
     parser.add_argument('--epochs', type=int, default=100,
                         help='학습 에폭 수 (기본: 100)')
     parser.add_argument('--batch-size', type=int, default=64,
@@ -476,12 +478,16 @@ def main():
     # Imitation RL 학습 요청
     if args.train_supervised:
         print(f"🎓 Supervised Learning 시작: {args.train_supervised}")
+        # --base-model이 우선, 없으면 --pretrain-model 사용
+        base_model = args.base_model or args.pretrain_model
+        if base_model:
+            print(f"📥 베이스 모델 사용: {base_model}")
         result = client.train_supervised(
             args.train_supervised,
             epochs=args.epochs,
             batch_size=args.batch_size,
             learning_rate=args.learning_rate,
-            model_path=args.pretrain_model
+            model_path=base_model
         )
         if result:
             print(f"✅ 학습 완료!")

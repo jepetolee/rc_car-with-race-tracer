@@ -488,7 +488,8 @@ python3 client_upload.py \
     --server http://SERVER_IP:5000 \
     --train-supervised uploaded_data/demos.pkl \
     --epochs 20 \
-    --batch-size 64
+    --batch-size 64\
+    --pretrain-model ./trained_models/dqn_multi_best_mark1.pth
 
 # 응답에서 model_path 확인:
 # "model_path": "trained_models/pretrained_20251129_190816.pth"
@@ -722,6 +723,7 @@ python collect_human_demonstrations.py \
     --port /dev/ttyACM0 \
     --output my_demos.pkl \
     --episodes 5
+    --episode-interval 10.0 \
 ```
 
 **조작키:**

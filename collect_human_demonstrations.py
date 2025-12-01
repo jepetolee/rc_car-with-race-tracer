@@ -276,12 +276,13 @@ class HumanDemonstrationCollector:
         
         return episode_data
     
-    def collect_multiple_episodes(self, num_episodes: int = 5):
+    def collect_multiple_episodes(self, num_episodes: int = 5, episode_interval: float = 3.0):
         """
         여러 에피소드 데이터 수집
         
         Args:
             num_episodes: 수집할 에피소드 수
+            episode_interval: 에피소드 간 대기 시간 (초, 기본: 3.0)
         
         Returns:
             demonstrations: 수집된 모든 에피소드 데이터
@@ -290,6 +291,7 @@ class HumanDemonstrationCollector:
         
         print(f"\n{'='*60}")
         print(f"총 {num_episodes}개 에피소드 데이터 수집")
+        print(f"에피소드 간 대기 시간: {episode_interval}초")
         print(f"{'='*60}\n")
         
         for episode in range(num_episodes):
@@ -298,8 +300,8 @@ class HumanDemonstrationCollector:
             
             # 에피소드 간 대기
             if episode < num_episodes - 1:
-                print(f"\n다음 에피소드를 준비하세요... (3초 후 시작)")
-                time.sleep(3)
+                print(f"\n다음 에피소드를 준비하세요... ({episode_interval}초 후 시작)")
+                time.sleep(episode_interval)
         
         return demonstrations
     
@@ -383,6 +385,8 @@ def main():
     # 수집 설정
     parser.add_argument('--episodes', type=int, default=1,
                         help='수집할 에피소드 수 (기본: 1)')
+    parser.add_argument('--episode-interval', type=float, default=3.0,
+                        help='에피소드 간 대기 시간 (초, 기본: 3.0)')
     parser.add_argument('--output', type=str, default='human_demos.pkl',
                         help='저장할 파일 경로 (기본: human_demos.pkl)')
     
@@ -403,7 +407,7 @@ def main():
         if args.episodes == 1:
             demonstrations = [collector.collect_episode(1)]
         else:
-            demonstrations = collector.collect_multiple_episodes(args.episodes)
+            demonstrations = collector.collect_multiple_episodes(args.episodes, args.episode_interval)
         
         # 데이터 저장
         collector.save_demonstrations(demonstrations, args.output)

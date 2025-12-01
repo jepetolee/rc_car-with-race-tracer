@@ -143,49 +143,100 @@ class QRDataCollector:
             rc_car = RC_Car_Interface()
             print("✅ 카메라 초기화 완료\n")
             
-            print("이미지 캡처 대기 중...")
-            print("(첫 이미지가 표시되면 키를 입력하세요)\n")
+            # 디스플레이 사용 가능 여부 확인
+            headless = False
+            termios_settings = None
+            try:
+                # 테스트 이미지로 디스플레이 확인
+                test_img = np.zeros((100, 100, 3), dtype=np.uint8)
+                cv2.imshow('test', test_img)
+                cv2.waitKey(1)
+                cv2.destroyAllWindows()
+                print("이미지 캡처 대기 중...")
+                print("(첫 이미지가 표시되면 키를 입력하세요)\n")
+            except (cv2.error, Exception) as e:
+                headless = True
+                print("⚠️  디스플레이를 사용할 수 없습니다. 헤드리스 모드로 실행합니다.")
+                print("   키보드 입력으로만 제어할 수 있습니다.\n")
+                # 헤드리스 모드에서 키보드 입력을 위해 termios 설정
+                try:
+                    import termios
+                    import tty
+                    termios_settings = termios.tcgetattr(sys.stdin)
+                    tty.setraw(sys.stdin.fileno())
+                except Exception:
+                    print("⚠️  키보드 입력 설정 실패. Enter 키로만 제어할 수 있습니다.\n")
             
             while True:
                 # 원본 이미지 캡처
                 img = self.get_raw_image(rc_car)
                 
-                # 이미지 표시 (확대하여 보기 쉽게)
-                display_img = cv2.resize(img, (640, 640), interpolation=cv2.INTER_NEAREST)
+                key = None
                 
-                # 통계 정보 표시
-                stats_text = f"QR 있음: {self.stats['qr_present']} | QR 없음: {self.stats['qr_absent']} | 총: {self.stats['total']}"
-                cv2.putText(display_img, stats_text, (10, 30),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-                cv2.putText(display_img, "q/1: QR있음 | n/0: QR없음 | s: 통계 | x: 종료", (10, 60),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                if not headless:
+                    try:
+                        # 이미지 표시 (확대하여 보기 쉽게)
+                        display_img = cv2.resize(img, (640, 640), interpolation=cv2.INTER_NEAREST)
+                        
+                        # 통계 정보 표시
+                        stats_text = f"QR 있음: {self.stats['qr_present']} | QR 없음: {self.stats['qr_absent']} | 총: {self.stats['total']}"
+                        cv2.putText(display_img, stats_text, (10, 30),
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                        cv2.putText(display_img, "q/1: QR있음 | n/0: QR없음 | s: 통계 | x: 종료", (10, 60),
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                        
+                        cv2.imshow('QR Data Collection', display_img)
+                        key = cv2.waitKey(100) & 0xFF
+                    except (cv2.error, Exception):
+                        # 디스플레이 오류 발생 시 헤드리스 모드로 전환
+                        headless = True
+                        print("\n⚠️  디스플레이 오류: 헤드리스 모드로 전환합니다...")
+                        cv2.destroyAllWindows()
                 
-                cv2.imshow('QR Data Collection', display_img)
+                if headless:
+                    # 헤드리스 모드: 키보드 입력 확인 (논블로킹)
+                    try:
+                        import select
+                        if select.select([sys.stdin], [], [], 0.1)[0]:
+                            key_char = sys.stdin.read(1)
+                            key = ord(key_char) if key_char else None
+                    except Exception:
+                        # select가 실패하면 키 입력 없음
+                        key = None
                 
-                key = cv2.waitKey(100) & 0xFF
+                if key:
+                    if key == ord('q') or key == ord('1'):
+                        # QR 코드 있음
+                        filepath = self.save_image(img, 1)
+                        print(f"✅ QR 있음 저장: {filepath}")
+                    elif key == ord('n') or key == ord('0'):
+                        # QR 코드 없음
+                        filepath = self.save_image(img, 0)
+                        print(f"✅ QR 없음 저장: {filepath}")
+                    elif key == ord('s'):
+                        # 통계 출력
+                        print(f"\n📊 현재 통계:")
+                        print(f"   QR 있음: {self.stats['qr_present']}")
+                        print(f"   QR 없음: {self.stats['qr_absent']}")
+                        print(f"   총: {self.stats['total']}")
+                        print()
+                    elif key == ord('x') or key == 27:  # ESC
+                        break
                 
-                if key == ord('q') or key == ord('1'):
-                    # QR 코드 있음
-                    filepath = self.save_image(img, 1)
-                    print(f"✅ QR 있음 저장: {filepath}")
-                elif key == ord('n') or key == ord('0'):
-                    # QR 코드 없음
-                    filepath = self.save_image(img, 0)
-                    print(f"✅ QR 없음 저장: {filepath}")
-                elif key == ord('s'):
-                    # 통계 출력
-                    print(f"\n📊 현재 통계:")
-                    print(f"   QR 있음: {self.stats['qr_present']}")
-                    print(f"   QR 없음: {self.stats['qr_absent']}")
-                    print(f"   총: {self.stats['total']}")
-                    print()
-                elif key == ord('x') or key == 27:  # ESC
-                    break
-                
-                time.sleep(0.1)  # CPU 사용량 감소
+                if not headless:
+                    time.sleep(0.1)  # CPU 사용량 감소
+                else:
+                    time.sleep(0.5)  # 헤드리스 모드에서는 조금 더 긴 간격
             
             # 정리
-            cv2.destroyAllWindows()
+            if not headless:
+                cv2.destroyAllWindows()
+            if termios_settings is not None:
+                try:
+                    import termios
+                    termios.tcsetattr(sys.stdin, termios.TCSADRAIN, termios_settings)
+                except Exception:
+                    pass
             self.save_metadata()
             
             print(f"\n✅ 데이터 수집 완료!")
@@ -197,7 +248,14 @@ class QRDataCollector:
             
         except KeyboardInterrupt:
             print("\n\n⚠️  사용자에 의해 중단되었습니다.")
-            cv2.destroyAllWindows()
+            if 'headless' in locals() and not headless:
+                cv2.destroyAllWindows()
+            if 'termios_settings' in locals() and termios_settings is not None:
+                try:
+                    import termios
+                    termios.tcsetattr(sys.stdin, termios.TCSADRAIN, termios_settings)
+                except Exception:
+                    pass
             self.save_metadata()
             if 'rc_car' in locals():
                 rc_car.close()
@@ -205,7 +263,14 @@ class QRDataCollector:
             print(f"\n❌ 오류 발생: {e}")
             import traceback
             traceback.print_exc()
-            cv2.destroyAllWindows()
+            if 'headless' in locals() and not headless:
+                cv2.destroyAllWindows()
+            if 'termios_settings' in locals() and termios_settings is not None:
+                try:
+                    import termios
+                    termios.tcsetattr(sys.stdin, termios.TCSADRAIN, termios_settings)
+                except Exception:
+                    pass
             self.save_metadata()
             if 'rc_car' in locals():
                 rc_car.close()

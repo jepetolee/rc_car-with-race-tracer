@@ -81,16 +81,36 @@ class ImitationRLTrainer:
             self.dones,
         ) = flatten_episodes(self.demos)
 
+        # 데이터에서 액션 차원 계산
+        data_action_dim = int(np.max(self.actions)) + 1
+        print(f"📐 데이터 액션 차원: {data_action_dim}")
+        
+        # 베이스 모델이 있으면 그 모델의 액션 차원을 사용
+        action_dim = data_action_dim
+        if model_path and os.path.exists(model_path):
+            try:
+                # 베이스 모델의 액션 차원 확인
+                checkpoint = torch.load(model_path, map_location=device)
+                if "q_network" in checkpoint:
+                    saved_state_dict = checkpoint["q_network"]
+                    if "q_head.weight" in saved_state_dict:
+                        base_action_dim = saved_state_dict["q_head.weight"].shape[0]
+                        action_dim = base_action_dim
+                        print(f"📐 베이스 모델 액션 차원: {base_action_dim} (데이터: {data_action_dim})")
+                        print(f"📐 모델 구조를 베이스 모델에 맞춤: {action_dim}")
+            except Exception as e:
+                print(f"⚠️  베이스 모델 액션 차원 확인 실패: {e}. 데이터 액션 차원 사용: {action_dim}")
+
         self.agent = DQNAgent(
             state_dim=self.states.shape[1],
-            action_dim=int(np.max(self.actions)) + 1,
+            action_dim=action_dim,
             lr=learning_rate,
             device=device,
             batch_size=batch_size,
         )
         if model_path and os.path.exists(model_path):
             print(f"📥 사전 학습 모델 로드: {model_path}")
-            self.agent.load(model_path, strict=False)
+            self.agent.load(model_path, strict=True)
 
     def _populate_buffer(self):
         for (
